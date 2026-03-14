@@ -238,16 +238,27 @@ class RiskAssessmentAgent:
         # Two-Way Team Model — always relevant
         selected.append({"name": "Two-Way Team Model", **DECISION_FRAMEWORKS["two_way_team_model"]})
 
-        # Somatic Verification — for construction/manufacturing or high time pressure
-        if ctx.industry in ("construction", "manufacturing") or ctx.time_pressure == "high":
+        # Somatic Verification — for construction/manufacturing, intuition-driven PMs,
+        # or high time pressure
+        if (
+            ctx.industry in ("construction", "manufacturing")
+            or ctx.time_pressure == "high"
+            or ctx.decision_style == "intuition"
+        ):
             selected.append({"name": "Somatic Verification", **DECISION_FRAMEWORKS["somatic_verification"]})
 
-        # Bureaucratic Shield — for senior PMs or formal-tool users
-        if ctx.experience_level == "senior" or ctx.decision_style == "formal_tools":
+        # Bureaucratic Shield — for senior PMs, formal-tool users, or high-liability
+        # external-focused risk profiles
+        if (
+            ctx.experience_level == "senior"
+            or ctx.decision_style == "formal_tools"
+            or (ctx.risk_locus == "external" and ctx.time_pressure == "high")
+        ):
             selected.append({"name": "Bureaucratic Shield", **DECISION_FRAMEWORKS["bureaucratic_shield"]})
 
-        # Truth-Link Technology — for manufacturing or IT
-        if ctx.industry in ("manufacturing", "it"):
+        # Truth-Link Technology — for manufacturing, IT, or balance-oriented PMs
+        # seeking data-driven augmentation
+        if ctx.industry in ("manufacturing", "it") or ctx.decision_style == "balance":
             selected.append({"name": "Truth-Link Technology", **DECISION_FRAMEWORKS["truth_link_technology"]})
 
         # Reverse Training — for cross-cultural teams or identified cultural archetype
@@ -262,17 +273,37 @@ class RiskAssessmentAgent:
         """Create an initial risk register combining user-provided and knowledge-base risks."""
         register: List[RiskItem] = []
 
+        # Determine base detectability from risk locus
+        if ctx.risk_locus == "external":
+            user_detectability = "late"
+        elif ctx.risk_locus == "internal":
+            user_detectability = "early"
+        else:
+            user_detectability = "late"
+
+        # Determine base probability from time pressure
+        if ctx.time_pressure == "high":
+            user_probability = "high"
+            ext_probability = "high"
+            int_probability = "medium"
+        elif ctx.time_pressure == "low":
+            user_probability = "low"
+            ext_probability = "low"
+            int_probability = "low"
+        else:
+            user_probability = "medium"
+            ext_probability = "medium"
+            int_probability = "medium"
+
         # Add user-provided top risks
         for risk_desc in ctx.top_risks:
-            # Heuristic: classify as external if locus says so
             category = ctx.risk_locus if ctx.risk_locus != "mixed" else "external"
-            # Default probability/impact — moderate since we don't have details
             item = RiskItem(
                 description=risk_desc,
                 category=category,
-                probability="medium",
+                probability=user_probability,
                 impact="high",
-                detectability="late",
+                detectability=user_detectability,
             )
             register.append(item)
 
@@ -281,7 +312,7 @@ class RiskAssessmentAgent:
             item = RiskItem(
                 description=risk_desc,
                 category="external",
-                probability="medium",
+                probability=ext_probability,
                 impact="high",
                 detectability="late",
             )
@@ -292,24 +323,11 @@ class RiskAssessmentAgent:
             item = RiskItem(
                 description=risk_desc,
                 category="internal",
-                probability="medium",
+                probability=int_probability,
                 impact="medium",
                 detectability="early",
             )
             register.append(item)
-
-        # Escalate probability/impact under high time pressure
-        if ctx.time_pressure == "high":
-            for item in register:
-                if item.probability == "low":
-                    item.probability = "medium"
-                if item.impact == "low":
-                    item.impact = "medium"
-                # Recalculate score
-                result = get_risk_level(item.probability, item.impact, item.detectability)
-                item.score = result["score"]
-                item.level = result["level"]
-                item.action = result["action"]
 
         # Sort by score descending
         register.sort(key=lambda r: r.score, reverse=True)

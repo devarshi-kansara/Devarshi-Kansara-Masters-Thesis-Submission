@@ -312,3 +312,68 @@ class TestRiskAssessmentAgent:
         )
         assert item.score == 1
         assert item.level == "Low"
+
+    # Input-sensitivity tests — different inputs must produce different outputs
+
+    def test_time_pressure_produces_different_scores(self, agent: RiskAssessmentAgent):
+        """Changing time pressure must visibly change risk scores."""
+        results = {}
+        for tp in ("low", "medium", "high"):
+            ctx = agent.build_context(
+                industry="construction", years_experience=5, projects_managed=10,
+                top_risks=["Test risk"], time_pressure=tp,
+            )
+            report = agent.generate_report(ctx)
+            results[tp] = sum(r.score for r in report.risk_register)
+        assert results["low"] < results["medium"] < results["high"], (
+            f"Scores must increase with pressure: low={results['low']}, "
+            f"medium={results['medium']}, high={results['high']}"
+        )
+
+    def test_decision_style_produces_different_frameworks(self, agent: RiskAssessmentAgent):
+        """Each decision style must select a different set of frameworks."""
+        results = {}
+        for ds in ("intuition", "balance", "formal_tools"):
+            ctx = agent.build_context(
+                industry="it", years_experience=5, projects_managed=10,
+                cultural_region="USA", decision_style=ds, time_pressure="medium",
+            )
+            report = agent.generate_report(ctx)
+            results[ds] = {fw["name"] for fw in report.framework_recommendations}
+        assert results["intuition"] != results["balance"], "intuition and balance must differ"
+        assert results["balance"] != results["formal_tools"], "balance and formal_tools must differ"
+
+    def test_risk_locus_affects_user_risk_scores(self, agent: RiskAssessmentAgent):
+        """Internal-locus risks should score differently from external-locus risks."""
+        ctx_int = agent.build_context(
+            industry="construction", years_experience=5, projects_managed=10,
+            top_risks=["Same risk"], risk_locus="internal", time_pressure="medium",
+        )
+        ctx_ext = agent.build_context(
+            industry="construction", years_experience=5, projects_managed=10,
+            top_risks=["Same risk"], risk_locus="external", time_pressure="medium",
+        )
+        report_int = agent.generate_report(ctx_int)
+        report_ext = agent.generate_report(ctx_ext)
+        # Find the user-provided risk in each register
+        user_int = next(r for r in report_int.risk_register if r.description == "Same risk")
+        user_ext = next(r for r in report_ext.risk_register if r.description == "Same risk")
+        assert user_int.score != user_ext.score, (
+            f"Internal ({user_int.score}) and external ({user_ext.score}) should differ"
+        )
+
+    def test_same_inputs_produce_same_output(self, agent: RiskAssessmentAgent):
+        """Identical inputs must always produce identical output (deterministic)."""
+        kwargs = dict(
+            industry="manufacturing", years_experience=12, projects_managed=25,
+            cultural_region="India", top_risks=["Supply chain disruption"],
+            risk_locus="external", decision_style="intuition", time_pressure="high",
+        )
+        report1 = agent.generate_report(agent.build_context(**kwargs))
+        report2 = agent.generate_report(agent.build_context(**kwargs))
+        scores1 = [r.score for r in report1.risk_register]
+        scores2 = [r.score for r in report2.risk_register]
+        fws1 = [fw["name"] for fw in report1.framework_recommendations]
+        fws2 = [fw["name"] for fw in report2.framework_recommendations]
+        assert scores1 == scores2, "Same inputs must produce identical scores"
+        assert fws1 == fws2, "Same inputs must produce identical frameworks"
