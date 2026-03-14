@@ -21,6 +21,13 @@ class RiskItem:
     score: int = 0
     level: str = ""
     action: str = ""
+    # Live-data enrichment fields (populated by InternetDataFetcher)
+    recent_news_link: Optional[str] = None   # URL of a related recent news article
+    recent_news_title: Optional[str] = None  # Article headline
+    recent_news_date: Optional[str] = None   # Publication date
+    regulatory_status: Optional[str] = None  # Current compliance note
+    market_signal: Optional[str] = None      # Price / labour trend snippet
+    academic_citation: Optional[str] = None  # APA-style citation with URL
 
     def __post_init__(self) -> None:
         from agent.knowledge_base import get_risk_level
@@ -68,3 +75,11 @@ class AssessmentReport:
     reality_check_plan: dict
     risk_register: List[RiskItem]
     summary: str = ""
+    # Live-data enrichment (populated when InternetDataFetcher is available)
+    live_data_timestamp: Optional[str] = None   # ISO-8601 UTC timestamp
+    data_sources_used: List[str] = field(default_factory=list)
+    regulatory_updates: List[dict] = field(default_factory=list)
+    industry_news: List[dict] = field(default_factory=list)
+    market_signals: dict = field(default_factory=dict)
+    academic_research: List[dict] = field(default_factory=list)
+    geopolitical_alerts: List[dict] = field(default_factory=list)
