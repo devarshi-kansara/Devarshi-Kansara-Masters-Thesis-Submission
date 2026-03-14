@@ -129,6 +129,33 @@ if submitted:
     st.success("✅ Assessment complete! Scroll down to review your personalised risk report.")
     st.divider()
 
+    # ── Consultant Narrative ──────────────────────────────────────────────────
+    if report.consultant_narrative:
+        st.header("🎯 Expert Consultant Report")
+        st.code(report.consultant_narrative, language=None)
+        st.divider()
+
+    # ── Persona Profile ───────────────────────────────────────────────────────
+    if report.persona_profile:
+        with st.expander("👤 Your Profile & Blind Spots", expanded=False):
+            persona = report.persona_profile
+            st.subheader(f"Cultural Archetype: {persona.get('archetype', 'Unknown')}")
+            p_col1, p_col2 = st.columns(2)
+            with p_col1:
+                st.markdown("**Your Strengths:**")
+                for s in persona.get("strengths", []):
+                    st.markdown(f"  ✅ {s}")
+            with p_col2:
+                st.markdown("**Your Blind Spots:**")
+                for bs in persona.get("blind_spots", []):
+                    st.warning(bs)
+            exp_bs = persona.get("experience_blind_spot", "")
+            if exp_bs:
+                st.error(f"🎯 **Your Specific Blind Spot:** {exp_bs}")
+            if persona.get("academic_source"):
+                st.caption(f"📚 Source: {persona['academic_source']}")
+        st.divider()
+
     # ── Summary ──────────────────────────────────────────────────────────────
     st.header("📊 Summary")
     col1, col2, col3, col4 = st.columns(4)
@@ -160,6 +187,28 @@ if submitted:
             c3.markdown(f"**Impact:** {risk.impact}")
             c4.markdown(f"**Risk Score:** {risk.score}")
             st.info(f"**Recommended Action:** {risk.action}")
+            # ── Phase 1 enrichment fields ──────────────────────────────────
+            if risk.confidence is not None:
+                st.caption(f"🎯 Confidence: {risk.confidence:.0%}")
+            if risk.benchmark:
+                with st.expander("📊 How You Compare (Benchmark Data)"):
+                    bm = risk.benchmark
+                    bm_col1, bm_col2, bm_col3 = st.columns(3)
+                    bm_col1.metric("Frequency", bm.get("frequency", "—"))
+                    bm_col2.metric("Recovery Rate", bm.get("success_rate", "—"))
+                    bm_col3.metric("Failure Rate", bm.get("failure_rate", "—"))
+                    if bm.get("typical_cost"):
+                        st.markdown(f"**Typical Cost Impact:** {bm['typical_cost']}")
+                    if bm.get("source"):
+                        st.caption(f"Source: {bm['source']}")
+            if risk.blind_spot:
+                st.warning(f"🧠 **Your Blind Spot:** {risk.blind_spot}")
+            if risk.novel_mitigation or risk.cross_industry_insight:
+                insight = risk.novel_mitigation or risk.cross_industry_insight
+                with st.expander("💡 Cross-Industry Insight"):
+                    st.markdown(insight)
+            if risk.academic_source:
+                st.caption(f"📚 Academic Source: {risk.academic_source}")
 
     # ── Industry Context ──────────────────────────────────────────────────────
     st.header(f"🏗 Industry Context — {industry}")
@@ -197,11 +246,23 @@ if submitted:
 
     # ── Decision Frameworks ───────────────────────────────────────────────────
     st.header("🧰 Decision Frameworks")
-    for fw in report.framework_recommendations:
+
+    # Show enriched frameworks with rationale if available
+    frameworks_to_show = report.frameworks_with_rationale or report.framework_recommendations
+    for fw in frameworks_to_show:
         with st.expander(f"▸ {fw['name']}"):
             st.markdown(fw["description"])
+            why = fw.get("why_for_you", "")
+            if why:
+                st.info(f"**Why for you:** {why}")
             st.markdown(f"**When to apply:** {fw['when_to_apply']}")
             st.markdown(f"**Example:** *{fw['example']}*")
+            if fw.get("success_rate"):
+                st.caption(f"Success Rate: {fw['success_rate']}")
+            if fw.get("blind_spot_it_addresses"):
+                st.caption(f"Blind Spot Addressed: {fw['blind_spot_it_addresses']}")
+            if fw.get("academic_source"):
+                st.caption(f"📚 Source: {fw['academic_source']}")
 
     # ── 20% Reality Check ────────────────────────────────────────────────────
     st.header("📅 Your 20% Reality Check Milestone")

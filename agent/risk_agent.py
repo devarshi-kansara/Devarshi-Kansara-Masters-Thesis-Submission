@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import List
 
+from agent.context_analyzer import ContextAnalyzer
+from agent.consultant_report import ConsultantReporter, _get_academic_source, _get_cross_industry_insight
+from agent.framework_recommender import FrameworkRecommender
 from agent.knowledge_base import (
     CULTURAL_ARCHETYPES,
     DECISION_FRAMEWORKS,
@@ -107,8 +110,28 @@ class RiskAssessmentAgent:
             ctx.industry, INDUSTRY_RISKS["construction"]
         )
         exp_data = EXPERIENCE_GUIDANCE.get(ctx.experience_level, EXPERIENCE_GUIDANCE["mid"])
+
+        # ── Phase 1: Personalisation modules ─────────────────────────────────
+        analyzer = ContextAnalyzer()
+        persona = analyzer.get_persona_profile(ctx)
+        benchmarks = analyzer.get_benchmarks(ctx)
+
+        # Build risk register with enrichment
+        risk_register = self._build_risk_register(ctx, industry_data, persona, benchmarks)
+
+        # Use FrameworkRecommender for enriched framework selection
+        recommender = FrameworkRecommender()
+        frameworks_with_rationale = recommender.recommend_frameworks(ctx, risk_register)
+
+        # Build legacy framework list for backward compatibility
         frameworks = self._select_frameworks(ctx)
-        risk_register = self._build_risk_register(ctx, industry_data)
+
+        # Generate consultant narrative
+        reporter = ConsultantReporter()
+        narrative = reporter.generate_narrative(
+            ctx, risk_register, persona, frameworks_with_rationale, benchmarks
+        )
+
         summary = self._build_summary(ctx, risk_register, frameworks)
 
         return AssessmentReport(
@@ -119,6 +142,10 @@ class RiskAssessmentAgent:
             reality_check_plan=REALITY_CHECK_FRAMEWORK,
             risk_register=risk_register,
             summary=summary,
+            persona_profile=persona,
+            benchmarks=benchmarks,
+            frameworks_with_rationale=frameworks_with_rationale,
+            consultant_narrative=narrative,
         )
 
     def run_interactive_session(self) -> AssessmentReport:
@@ -257,10 +284,60 @@ class RiskAssessmentAgent:
         return selected
 
     def _build_risk_register(
-        self, ctx: ProjectContext, industry_data: dict
+        self, ctx: ProjectContext, industry_data: dict,
+        persona: dict | None = None, benchmarks: dict | None = None
     ) -> List[RiskItem]:
         """Create an initial risk register combining user-provided and knowledge-base risks."""
         register: List[RiskItem] = []
+        persona = persona or {}
+        benchmarks = benchmarks or {}
+
+        # Determine persona blind spots list for enrichment
+        persona_blind_spots: List[str] = persona.get("blind_spots", [])
+        exp_blind_spot: str = persona.get("experience_blind_spot", "")
+
+        def _enrich(item: RiskItem, index: int) -> RiskItem:
+            """Enrich a RiskItem with benchmark, blind_spot, cross-industry, and academic source."""
+            # Benchmark: try to match by keyword
+            default_bm = benchmarks.get("default", {})
+            desc_lower = item.description.lower()
+            matched_bm = default_bm
+            for key, bm in benchmarks.items():
+                if key.startswith("_"):
+                    continue
+                if key.replace("_", " ") in desc_lower or any(
+                    part in desc_lower for part in key.split("_")
+                ):
+                    matched_bm = bm
+                    break
+            item.benchmark = matched_bm
+
+            # Blind spot: rotate through persona blind spots for variety
+            all_blind_spots = list(persona_blind_spots)
+            if exp_blind_spot:
+                all_blind_spots = [exp_blind_spot] + all_blind_spots
+            if all_blind_spots:
+                item.blind_spot = all_blind_spots[index % len(all_blind_spots)]
+
+            # Cross-industry insight
+            item.cross_industry_insight = _get_cross_industry_insight(item.description)
+            item.novel_mitigation = item.cross_industry_insight
+
+            # Academic source
+            item.academic_source = _get_academic_source(item.description)
+
+            # Confidence: high-pressure reduces confidence slightly (more uncertainty)
+            base_conf = 0.90 if ctx.time_pressure == "low" else (0.85 if ctx.time_pressure == "medium" else 0.80)
+            # Adjust by experience: senior PMs have higher confidence in assessments
+            if ctx.experience_level == "senior":
+                base_conf = min(1.0, base_conf + 0.05)
+            elif ctx.experience_level == "junior":
+                base_conf = max(0.60, base_conf - 0.05)
+            item.confidence = round(base_conf, 2)
+
+            return item
+
+        item_index = 0
 
         # Add user-provided top risks
         for risk_desc in ctx.top_risks:
@@ -274,7 +351,9 @@ class RiskAssessmentAgent:
                 impact="high",
                 detectability="late",
             )
+            _enrich(item, item_index)
             register.append(item)
+            item_index += 1
 
         # Add top 3 industry-specific external risks
         for risk_desc in industry_data.get("primary_external", [])[:3]:
@@ -285,7 +364,9 @@ class RiskAssessmentAgent:
                 impact="high",
                 detectability="late",
             )
+            _enrich(item, item_index)
             register.append(item)
+            item_index += 1
 
         # Add top 2 industry-specific internal risks
         for risk_desc in industry_data.get("primary_internal", [])[:2]:
@@ -296,7 +377,9 @@ class RiskAssessmentAgent:
                 impact="medium",
                 detectability="early",
             )
+            _enrich(item, item_index)
             register.append(item)
+            item_index += 1
 
         # Escalate probability/impact under high time pressure
         if ctx.time_pressure == "high":

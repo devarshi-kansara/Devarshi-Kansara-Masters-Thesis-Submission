@@ -34,14 +34,17 @@ This agent operationalises the thesis findings into a practical, interactive too
 ```
 .
 ├── agent/
-│   ├── __init__.py          # Package marker
-│   ├── knowledge_base.py    # All thesis-derived risk data and frameworks
-│   ├── models.py            # Data classes (RiskItem, ProjectContext, AssessmentReport)
-│   └── risk_agent.py        # Core agent logic (interview + report generation)
+│   ├── __init__.py              # Package marker
+│   ├── knowledge_base.py        # All thesis-derived risk data and frameworks
+│   ├── models.py                # Data classes (RiskItem, ProjectContext, AssessmentReport)
+│   ├── context_analyzer.py      # Persona profiles, industry benchmarks, blind-spot analysis
+│   ├── framework_recommender.py # Dynamic framework selection with personalised rationale
+│   ├── consultant_report.py     # Narrative-style consultant report generation
+│   └── risk_agent.py            # Core agent logic (interview + report generation)
 ├── tests/
-│   └── test_agent.py        # 34 pytest tests covering all components
+│   └── test_agent.py        # 67 pytest tests covering all components
 ├── app.py                   # Streamlit web interface
-├── main.py                  # CLI entry point
+├── main.py                  # CLI entry point (--demo, --verbose)
 └── requirements.txt
 ```
 
@@ -81,7 +84,15 @@ python main.py --demo
 
 Runs a pre-filled construction project scenario and prints the report immediately.
 
-### 2d. Programmatic usage
+### 2d. CLI — demo with verbose output (show data sources)
+
+```bash
+python main.py --demo --verbose
+```
+
+Prints the persona profile, industry benchmarks, and data sources used alongside the full report.
+
+### 2e. Programmatic usage
 
 ```python
 from agent.risk_agent import RiskAssessmentAgent
@@ -103,6 +114,21 @@ report = agent.generate_report(ctx)
 print(report.summary)
 for risk in report.risk_register:
     print(f"[{risk.level}] {risk.description} (score={risk.score})")
+
+# Phase 1: Access personalization data
+print(report.consultant_narrative)      # Full consultant-style narrative
+print(report.persona_profile)           # Deep persona analysis
+print(report.benchmarks)               # Industry benchmarks
+for fw in report.frameworks_with_rationale:
+    print(f"{fw['name']}: {fw['why_for_you']}")  # Why each framework for this user
+
+# Access enriched risk fields
+for risk in report.risk_register:
+    print(f"Confidence: {risk.confidence:.0%}")
+    print(f"Benchmark: {risk.benchmark}")
+    print(f"Blind Spot: {risk.blind_spot}")
+    print(f"Academic Source: {risk.academic_source}")
+    print(f"Cross-Industry Insight: {risk.cross_industry_insight}")
 ```
 
 ---
@@ -113,7 +139,7 @@ for risk in report.risk_register:
 python -m pytest tests/ -v
 ```
 
-34 tests covering the knowledge base, data models, and agent logic.
+67 tests covering the knowledge base, data models, agent logic, and Phase 1 personalization engine.
 
 ---
 
@@ -121,14 +147,62 @@ python -m pytest tests/ -v
 
 Every generated report includes:
 
-1. **Summary** — industry, experience level, time pressure, and top-level risk counts
-2. **Risk Register** — scored and sorted list (Critical → High → Medium → Low), combining your top risks with industry-specific knowledge-base risks
-3. **Industry Context** — primary external/internal risks and blind spots for outsiders
-4. **Experience-Level Guidance** — tailored strengths, development areas, and recommended actions for Junior / Mid / Senior PMs
-5. **Decision Frameworks** — contextually selected thesis frameworks with when-to-apply guidance and concrete examples
-6. **20 % Reality Check Milestone** — structured workshop agenda and expected output
-7. **First 20 % Action Checklist** — industry-specific checklist of concrete early-phase actions
-8. **Cultural Archetype** *(if detected)* — Process Guardian vs. Resource Navigator characteristics and cross-training recommendations
+1. **Expert Consultant Narrative** — full narrative-style report with benchmarks, blind spots, cross-industry insights, and academic citations
+2. **Your Profile & Blind Spots** — persona archetype, strengths, and specific blind-spot warnings based on your region + experience
+3. **Summary** — industry, experience level, time pressure, and top-level risk counts
+4. **Risk Register** — scored and sorted list (Critical → High → Medium → Low), each risk enriched with:
+   - Industry benchmark data (frequency, recovery rate, failure rate, typical cost)
+   - Your specific blind spot for that risk
+   - Cross-industry insight / novel mitigation
+   - Academic citation
+   - Confidence score (0–100%)
+5. **Industry Context** — primary external/internal risks and blind spots for outsiders
+6. **Experience-Level Guidance** — tailored strengths, development areas, and recommended actions for Junior / Mid / Senior PMs
+7. **Decision Frameworks** — contextually selected thesis + new frameworks with personalised WHY rationale
+8. **20 % Reality Check Milestone** — structured workshop agenda and expected output
+9. **First 20 % Action Checklist** — industry-specific checklist of concrete early-phase actions
+10. **Cultural Archetype** *(if detected)* — Process Guardian vs. Resource Navigator characteristics and cross-training recommendations
+
+---
+
+## Phase 1: Core Personalization Engine
+
+Phase 1 adds three new modules that transform the agent from a static knowledge-base lookup into a **true expert consultant**:
+
+### New Modules
+
+| Module | Purpose |
+|---|---|
+| `agent/context_analyzer.py` | Derives persona profiles, industry benchmarks, and experience/region-specific blind-spot warnings |
+| `agent/framework_recommender.py` | Dynamically selects frameworks with personalised WHY rationale; includes 3 new frameworks beyond thesis |
+| `agent/consultant_report.py` | Generates narrative-style consultant reports with benchmarks, citations, and cross-industry insights |
+
+### New Framework Library (9 total)
+
+**Thesis frameworks (6):** Safety Premium · Somatic Verification · Bureaucratic Shield · Two-Way Team Model · Reverse Training · Truth-Link Technology
+
+**New frameworks (3):**
+- **Pre-Mortem Analysis** — imagine the project has failed and work backwards (Klein, 1989)
+- **Black Swan Awareness** — systematic low-probability, high-impact event scan (Taleb, 2007)
+- **3-Scenario Analysis** — Best / Most Likely / Worst Case planning (Schwartz, 1991)
+
+### Personalization: What Changes Based on Your Profile
+
+| Input | What Changes |
+|---|---|
+| **Cultural region** (Germany, India, USA…) | Persona archetype, blind spots, cultural insights, framework selection |
+| **Experience level** (Junior/Mid/Senior) | Cohort benchmarks, blind-spot warnings, confidence scoring, framework rationale |
+| **Industry** (Construction/Manufacturing/IT) | Industry benchmarks, Somatic Verification / Truth-Link selection, narrative sections |
+| **Time pressure** (Low/Medium/High) | Risk score escalation, confidence levels, Pre-Mortem / Black Swan triggers |
+| **Decision style** | Bureaucratic Shield trigger, framework rationale tone |
+
+### Data Sources Used in Benchmarks
+
+- PMI Pulse of the Profession (2023)
+- Dodge Data & Analytics Construction Outlook (2024)
+- Gartner Manufacturing Technology Survey (2023)
+- McKinsey IT Project Research (2023)
+- Kansara, D. (2026) — HDBW Master's Thesis
 
 ---
 
