@@ -32,6 +32,14 @@ with st.sidebar:
         "Fill in the form on the right to receive a personalised "
         "risk assessment for the **critical first 20%** of your project."
     )
+    st.divider()
+    if st.button("🔄 Clear Data Cache", help="Force re-fetch of all live internet data on next report generation."):
+        try:
+            from agent.cache_manager import CacheManager
+            removed = CacheManager().clear_old_cache()
+            st.success(f"Cache cleared ({removed} stale entries removed). Next report will fetch fresh data.")
+        except Exception:
+            st.warning("Could not clear cache.")
 
 # ── Page header ───────────────────────────────────────────────────────────────
 st.title("📋 Early-Stage Project Risk Assessment")
@@ -124,9 +132,32 @@ if submitted:
         decision_style=style_map[decision_style],
         time_pressure=time_pressure.lower(),
     )
-    report = agent.generate_report(ctx)
+
+    # ── Fetch live internet data with spinner feedback ────────────────────────
+    with st.status("📡 Fetching live data...", expanded=True) as status:
+        st.write("📡 Fetching live regulatory data...")
+        st.write("📰 Scanning industry news...")
+        st.write("💰 Collecting market signals...")
+        st.write("📚 Searching academic research...")
+        st.write("⚠️ Checking geopolitical alerts...")
+        report = agent.generate_report(ctx, fetch_live_data=True)
+        status.update(label="✅ Live data fetched!", state="complete", expanded=False)
+
+    live_ok = bool(report.live_data_timestamp)
 
     st.success("✅ Assessment complete! Scroll down to review your personalised risk report.")
+    if live_ok:
+        ts = report.live_data_timestamp or ""
+        sources = ", ".join(report.data_sources_used) if report.data_sources_used else "None"
+        st.info(
+            f"🌐 **Live data integrated** · Last updated: {ts} · "
+            f"Sources: {sources}"
+        )
+    else:
+        st.warning(
+            "⚠️ Some live data unavailable — using cached/local data. "
+            "The risk assessment is still complete based on the knowledge base."
+        )
     st.divider()
 
     # ── Summary ──────────────────────────────────────────────────────────────
@@ -160,6 +191,101 @@ if submitted:
             c3.markdown(f"**Impact:** {risk.impact}")
             c4.markdown(f"**Risk Score:** {risk.score}")
             st.info(f"**Recommended Action:** {risk.action}")
+
+            # Live-data enrichment
+            if risk.recent_news_title:
+                news_link = f"[{risk.recent_news_title}]({risk.recent_news_link})" if risk.recent_news_link else risk.recent_news_title
+                st.markdown(f"📰 **Recent News:** {news_link} _{risk.recent_news_date}_")
+            if risk.regulatory_status:
+                st.markdown(f"🏛️ **Regulatory Note:** {risk.regulatory_status}")
+            if risk.market_signal:
+                st.markdown(f"💰 **Market Signal:** {risk.market_signal}")
+            if risk.academic_citation:
+                st.markdown(f"📚 **Research:** {risk.academic_citation}")
+
+    # ── Live Data Sections ────────────────────────────────────────────────────
+
+    # 1. Regulatory Updates
+    if report.regulatory_updates:
+        st.header("🌍 Latest Regulatory Updates")
+        for item in report.regulatory_updates:
+            title = item.get("title", "")
+            url = item.get("url", "")
+            date = item.get("date", "")
+            if url:
+                st.markdown(f"- [{title}]({url}) _{date}_")
+            else:
+                st.markdown(f"- {title} _{date}_")
+    else:
+        if live_ok:
+            st.header("🌍 Latest Regulatory Updates")
+            st.caption("No regulatory updates found for this query.")
+
+    # 2. Industry News
+    if report.industry_news:
+        st.header("📰 Industry News This Week")
+        for item in report.industry_news:
+            title = item.get("title", "")
+            url = item.get("url", "")
+            date = item.get("date", "")
+            if url:
+                st.markdown(f"- [{title}]({url}) _{date}_")
+            else:
+                st.markdown(f"- {title} _{date}_")
+    else:
+        if live_ok:
+            st.header("📰 Industry News This Week")
+            st.caption("No industry news found for this query.")
+
+    # 3. Market Signals
+    if report.market_signals:
+        st.header("💰 Market Signals")
+        news_signals = report.market_signals.get("news_signals", [])
+        macro = report.market_signals.get("macro_indicators", [])
+        if macro:
+            cols = st.columns(len(macro))
+            for col, ind in zip(cols, macro):
+                label = ind.get("indicator", "").replace("_", " ").title()
+                value = ind.get("value", "N/A")
+                year = ind.get("year", "")
+                col.metric(label, f"{value} ({year})", delta=None)
+                col.caption(f"Source: {ind.get('source', 'World Bank')}")
+        for item in news_signals[:3]:
+            title = item.get("title", "")
+            url = item.get("url", "")
+            if url:
+                st.markdown(f"- [{title}]({url})")
+            else:
+                st.markdown(f"- {title}")
+
+    # 4. Academic Research
+    if report.academic_research:
+        st.header("📚 Recent Research")
+        for paper in report.academic_research:
+            title = paper.get("title", "")
+            authors = paper.get("authors", "")
+            pub = paper.get("published", "")[:7]
+            url = paper.get("url", "")
+            summary = paper.get("summary", "")[:200]
+            with st.expander(f"📄 {title}"):
+                st.markdown(f"**Authors:** {authors}  |  **Published:** {pub}")
+                if summary:
+                    st.markdown(f"*{summary}...*")
+                if url:
+                    st.markdown(f"[View on arXiv]({url})")
+                st.caption("Source: arXiv")
+
+    # 5. Geopolitical Alerts
+    if report.geopolitical_alerts:
+        st.header("⚠️ Geopolitical Alerts")
+        for item in report.geopolitical_alerts:
+            title = item.get("title", "")
+            url = item.get("url", "")
+            date = item.get("date", "")
+            if url:
+                st.warning(f"[{title}]({url}) _{date}_")
+            else:
+                st.warning(f"{title} _{date}_")
 
     # ── Industry Context ──────────────────────────────────────────────────────
     st.header(f"🏗 Industry Context — {industry}")

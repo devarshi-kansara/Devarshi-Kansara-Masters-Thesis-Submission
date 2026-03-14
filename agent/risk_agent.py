@@ -4,10 +4,18 @@ Core risk assessment agent logic.
 The agent conducts a structured interview based on the thesis questionnaire,
 analyses the responses using the thesis knowledge base, and produces a tailored
 risk assessment report with prioritised recommendations.
+
+Phase 2 enhancement: live internet data is fetched via
+:class:`~agent.internet_fetcher.InternetDataFetcher` and attached to the
+:class:`~agent.models.AssessmentReport` and individual
+:class:`~agent.models.RiskItem` entries.  All network calls are cached for 24
+hours and the agent degrades gracefully if the network is unavailable.
 """
 from __future__ import annotations
 
-from typing import List
+import logging
+import time
+from typing import Any, Dict, List, Optional
 
 from agent.knowledge_base import (
     CULTURAL_ARCHETYPES,
@@ -18,6 +26,8 @@ from agent.knowledge_base import (
     get_risk_level,
 )
 from agent.models import AssessmentReport, ProjectContext, RiskItem
+
+logger = logging.getLogger(__name__)
 
 # ── Experience thresholds ─────────────────────────────────────────────────────
 _JUNIOR_MAX_YEARS = 3
@@ -101,8 +111,23 @@ class RiskAssessmentAgent:
         )
         return ctx
 
-    def generate_report(self, ctx: ProjectContext) -> AssessmentReport:
-        """Produce a full :class:`AssessmentReport` for the given context."""
+    def generate_report(
+        self,
+        ctx: ProjectContext,
+        fetch_live_data: bool = True,
+    ) -> AssessmentReport:
+        """Produce a full :class:`AssessmentReport` for the given context.
+
+        Parameters
+        ----------
+        ctx:
+            The project context built by :meth:`build_context`.
+        fetch_live_data:
+            When ``True`` (default), call the internet fetcher to enrich the
+            report with regulatory updates, industry news, market signals,
+            academic research and geopolitical alerts.  Set to ``False`` in
+            tests or offline environments.
+        """
         industry_data = INDUSTRY_RISKS.get(
             ctx.industry, INDUSTRY_RISKS["construction"]
         )
@@ -111,7 +136,7 @@ class RiskAssessmentAgent:
         risk_register = self._build_risk_register(ctx, industry_data)
         summary = self._build_summary(ctx, risk_register, frameworks)
 
-        return AssessmentReport(
+        report = AssessmentReport(
             context=ctx,
             industry_risks=industry_data,
             experience_guidance=exp_data,
@@ -120,6 +145,121 @@ class RiskAssessmentAgent:
             risk_register=risk_register,
             summary=summary,
         )
+
+        if fetch_live_data:
+            self._enrich_with_live_data(report, ctx)
+
+        return report
+
+    def _enrich_with_live_data(
+        self, report: AssessmentReport, ctx: ProjectContext
+    ) -> None:
+        """Fetch live internet data and attach it to *report* in-place.
+
+        Failures are caught and logged so the report is always returned.
+        """
+        try:
+            from agent.internet_fetcher import InternetDataFetcher  # lazy import
+        except ImportError:
+            return
+
+        fetcher = InternetDataFetcher()
+        region_text = ctx.cultural_region  # archetype string e.g. "process_guardian"
+        sources_used: List[str] = []
+
+        # ── Regulatory updates ────────────────────────────────────────────────
+        try:
+            reg = fetcher.fetch_regulatory_updates(ctx.industry, region_text)
+            report.regulatory_updates = reg.get("items", [])
+            sources_used.extend(reg.get("sources", []))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Regulatory fetch failed: %s", exc)
+
+        # ── Industry news ─────────────────────────────────────────────────────
+        try:
+            news = fetcher.fetch_industry_news(ctx.industry)
+            report.industry_news = news.get("items", [])
+            sources_used.extend(news.get("sources", []))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Industry news fetch failed: %s", exc)
+
+        # ── Market signals ────────────────────────────────────────────────────
+        try:
+            mkt = fetcher.fetch_market_signals(ctx.industry)
+            report.market_signals = mkt
+            sources_used.extend(mkt.get("sources", []))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Market signals fetch failed: %s", exc)
+
+        # ── Academic research ─────────────────────────────────────────────────
+        try:
+            risk_kws = [r.description.split()[0] for r in report.risk_register[:3]]
+            risk_kws.append(ctx.industry)
+            research = fetcher.fetch_academic_research(risk_kws)
+            report.academic_research = research.get("papers", [])
+            sources_used.extend(research.get("sources", []))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Academic research fetch failed: %s", exc)
+
+        # ── Geopolitical risks ────────────────────────────────────────────────
+        try:
+            geo = fetcher.fetch_geopolitical_risks(
+                region=region_text, industry=ctx.industry
+            )
+            report.geopolitical_alerts = geo.get("items", [])
+            sources_used.extend(geo.get("sources", []))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Geopolitical fetch failed: %s", exc)
+
+        # ── Enrich individual risk items ──────────────────────────────────────
+        self._enrich_risk_items(report)
+
+        # ── Metadata ──────────────────────────────────────────────────────────
+        report.live_data_timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        report.data_sources_used = list(dict.fromkeys(sources_used))  # deduplicated
+
+    def _enrich_risk_items(self, report: AssessmentReport) -> None:
+        """Attach the best-matching news / research / market item to each risk."""
+        news_items = report.industry_news
+        reg_items = report.regulatory_updates
+        mkt_news = report.market_signals.get("news_signals", [])
+        macro = report.market_signals.get("macro_indicators", [])
+        papers = report.academic_research
+
+        for risk in report.risk_register:
+            risk_lower = risk.description.lower()
+
+            # Recent news link — find the most relevant article by word overlap
+            best_news = _best_match(risk_lower, news_items + reg_items)
+            if best_news:
+                risk.recent_news_link = best_news.get("url", "")
+                risk.recent_news_title = best_news.get("title", "")
+                risk.recent_news_date = best_news.get("date", "")
+
+            # Regulatory status
+            best_reg = _best_match(risk_lower, reg_items)
+            if best_reg:
+                risk.regulatory_status = best_reg.get("title", "")
+
+            # Market signal
+            mkt_item = _best_match(risk_lower, mkt_news)
+            if mkt_item:
+                risk.market_signal = mkt_item.get("title", "")
+            elif macro:
+                ind = macro[0]
+                risk.market_signal = (
+                    f"{ind['indicator'].replace('_', ' ').title()}: "
+                    f"{ind['value']} ({ind['year']}) — {ind['source']}"
+                )
+
+            # Academic citation
+            if papers:
+                paper = papers[0]
+                risk.academic_citation = (
+                    f"{paper.get('authors', 'Unknown')} ({paper.get('published', '')[:4]}). "
+                    f"{paper.get('title', '')}. "
+                    f"arXiv. {paper.get('url', '')}"
+                )
 
     def run_interactive_session(self) -> AssessmentReport:
         """Run a full conversational interview in the terminal and return the report."""
@@ -479,3 +619,26 @@ Estimated time: 3–5 minutes.
                 print(f"  Please enter a number between 1 and {len(choices)}.")
             except ValueError:
                 print("  Please enter a valid number.")
+
+
+# ── Module-level helpers ──────────────────────────────────────────────────────
+
+def _best_match(
+    risk_lower: str, items: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Return the item whose title has the most word overlap with *risk_lower*.
+
+    Returns ``None`` if *items* is empty or no overlap is found.
+    """
+    if not items:
+        return None
+    risk_words = set(risk_lower.split())
+    best: Optional[Dict[str, Any]] = None
+    best_score = 0
+    for item in items:
+        title = item.get("title", "").lower()
+        overlap = len(risk_words & set(title.split()))
+        if overlap > best_score:
+            best_score = overlap
+            best = item
+    return best if best_score > 0 else None
