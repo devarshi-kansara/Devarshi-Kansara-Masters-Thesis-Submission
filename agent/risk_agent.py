@@ -4,6 +4,14 @@ Core risk assessment agent logic.
 The agent conducts a structured interview based on the thesis questionnaire,
 analyses the responses using the thesis knowledge base, and produces a tailored
 risk assessment report with prioritised recommendations.
+
+The report is enriched by the ConsultantReportGenerator which adds:
+  - Context-driven persona analysis and benchmarks
+  - Academic citations and industry research references
+  - Cross-industry innovation patterns
+  - Black swan / tail-risk warnings
+  - Regulatory intelligence data
+  - Source attribution and confidence metrics
 """
 from __future__ import annotations
 
@@ -111,7 +119,7 @@ class RiskAssessmentAgent:
         risk_register = self._build_risk_register(ctx, industry_data)
         summary = self._build_summary(ctx, risk_register, frameworks)
 
-        return AssessmentReport(
+        report = AssessmentReport(
             context=ctx,
             industry_risks=industry_data,
             experience_guidance=exp_data,
@@ -120,6 +128,20 @@ class RiskAssessmentAgent:
             risk_register=risk_register,
             summary=summary,
         )
+
+        # Enrich with consultant insights (context analysis, benchmarks, citations, etc.)
+        report.consultant_insights = self._generate_consultant_insights(report)
+
+        return report
+
+    def _generate_consultant_insights(self, report: AssessmentReport) -> dict:
+        """Generate the consultant insights layer using the new specialist modules."""
+        try:
+            from agent.consultant_report import ConsultantReportGenerator
+            generator = ConsultantReportGenerator(use_live_data=False)
+            return generator.generate(report)
+        except Exception:
+            return {}
 
     def run_interactive_session(self) -> AssessmentReport:
         """Run a full conversational interview in the terminal and return the report."""
@@ -259,47 +281,162 @@ class RiskAssessmentAgent:
     def _build_risk_register(
         self, ctx: ProjectContext, industry_data: dict
     ) -> List[RiskItem]:
-        """Create an initial risk register combining user-provided and knowledge-base risks."""
+        """Create an initial risk register combining user-provided and knowledge-base risks.
+
+        Risk scores are now context-sensitive:
+        - Senior PMs see elevated strategic/political risks; junior see elevated operational risks
+        - High time pressure escalates all external risks
+        - Process Guardian region: elevated regulatory and documentation risks
+        - Resource Navigator region: elevated supply/labor and informal-agreement risks
+        - IT industry: elevated security risks; Construction: elevated geotechnical risks
+        """
         register: List[RiskItem] = []
+
+        # Derive context modifiers
+        is_senior = ctx.experience_level == "senior"
+        is_junior = ctx.experience_level == "junior"
+        is_process_guardian = ctx.cultural_region == "process_guardian"
+        is_resource_navigator = ctx.cultural_region == "resource_navigator"
+        high_pressure = ctx.time_pressure == "high"
+        low_pressure = ctx.time_pressure == "low"
+
+        def _external_detectability() -> str:
+            """External risks are harder to detect early under high pressure."""
+            if high_pressure:
+                return "post_occurrence"
+            if low_pressure:
+                return "early"
+            return "late"
+
+        def _impact_for_external() -> str:
+            """Senior PMs face higher political/strategic external risk."""
+            if is_senior:
+                return "high"
+            if high_pressure:
+                return "high"
+            return "medium"
+
+        def _probability_for_external() -> str:
+            """External risk probability increases under pressure and in complex regions."""
+            if high_pressure and (is_process_guardian or is_resource_navigator):
+                return "high"
+            if high_pressure:
+                return "medium"
+            return "medium"
+
+        def _internal_probability() -> str:
+            """Junior PMs face higher internal operational risk due to inexperience."""
+            if is_junior:
+                return "high"
+            if is_senior:
+                return "low"
+            return "medium"
+
+        def _internal_detectability() -> str:
+            """Senior PMs detect internal issues earlier via experience."""
+            if is_senior:
+                return "early"
+            return "late"
 
         # Add user-provided top risks
         for risk_desc in ctx.top_risks:
-            # Heuristic: classify as external if locus says so
             category = ctx.risk_locus if ctx.risk_locus != "mixed" else "external"
-            # Default probability/impact — moderate since we don't have details
+            if category == "external":
+                prob = _probability_for_external()
+                impact = _impact_for_external()
+                detectability = _external_detectability()
+            else:
+                prob = _internal_probability()
+                impact = "medium"
+                detectability = _internal_detectability()
             item = RiskItem(
                 description=risk_desc,
                 category=category,
-                probability="medium",
-                impact="high",
-                detectability="late",
+                probability=prob,
+                impact=impact,
+                detectability=detectability,
             )
             register.append(item)
 
-        # Add top 3 industry-specific external risks
+        # Add industry-specific external risks (context-sensitive P/I/D)
         for risk_desc in industry_data.get("primary_external", [])[:3]:
+            risk_lower = risk_desc.lower()
+            # Industry-specific severity adjustments
+            prob = _probability_for_external()
+            impact = _impact_for_external()
+            detectability = _external_detectability()
+
+            # Construction: geotechnical and regulatory risks are higher for process guardians
+            if ctx.industry == "construction" and is_process_guardian:
+                if any(k in risk_lower for k in ("soil", "permit", "regulat", "legal")):
+                    impact = "high"
+                    detectability = "late"
+
+            # Manufacturing: compliance gaps are critical for formal-tool environments
+            if ctx.industry == "manufacturing" and is_process_guardian:
+                if any(k in risk_lower for k in ("compliance", "mdr", "fda", "gdpr", "dora", "regulat")):
+                    impact = "high"
+                    detectability = "late"
+
+            # IT: security risks escalate with time pressure
+            if ctx.industry == "it" and high_pressure:
+                if any(k in risk_lower for k in ("security", "cyber", "gdpr", "dora", "compliance")):
+                    prob = "high"
+                    impact = "high"
+
+            # Resource Navigator: supply chain risks are more severe
+            if is_resource_navigator:
+                if any(k in risk_lower for k in ("supply", "material", "labor", "vendor", "resource")):
+                    prob = "high"
+                    detectability = "late"
+
             item = RiskItem(
                 description=risk_desc,
                 category="external",
-                probability="medium",
-                impact="high",
-                detectability="late",
+                probability=prob,
+                impact=impact,
+                detectability=detectability,
             )
             register.append(item)
 
-        # Add top 2 industry-specific internal risks
+        # Add industry-specific internal risks (context-sensitive P/I/D)
         for risk_desc in industry_data.get("primary_internal", [])[:2]:
+            risk_lower = risk_desc.lower()
+            prob = _internal_probability()
+            detectability = _internal_detectability()
+            # Default impact is medium for internal; escalate for critical internal risks
+            impact = "medium"
+
+            # Manufacturing: tolerance and calibration errors are critical
+            if ctx.industry == "manufacturing":
+                if any(k in risk_lower for k in ("calibrat", "tolerance", "defect", "quality", "error")):
+                    impact = "high"
+                    if is_process_guardian:
+                        detectability = "late"  # Over-documentation masks physical reality
+
+            # IT: technical debt cascades under pressure
+            if ctx.industry == "it" and high_pressure:
+                if any(k in risk_lower for k in ("debt", "error", "bug", "complet", "complexit")):
+                    impact = "high"
+                    prob = "high"
+                    detectability = "post_occurrence"
+
+            # Senior normalises internal issues (their blind spot)
+            if is_senior:
+                if any(k in risk_lower for k in ("minor", "small", "drift", "calibrat", "error")):
+                    prob = "medium"  # Seniors miss these via normalisation bias
+
             item = RiskItem(
                 description=risk_desc,
                 category="internal",
-                probability="medium",
-                impact="medium",
-                detectability="early",
+                probability=prob,
+                impact=impact,
+                detectability=detectability,
             )
             register.append(item)
 
-        # Escalate probability/impact under high time pressure
-        if ctx.time_pressure == "high":
+        # Escalate probability/impact under high time pressure (post-individual-scoring)
+        if high_pressure:
             for item in register:
                 if item.probability == "low":
                     item.probability = "medium"
@@ -323,6 +460,7 @@ class RiskAssessmentAgent:
         lines = [
             f"Industry: {ctx.industry.title()}  |  "
             f"Experience: {ctx.experience_level.title()} ({ctx.years_experience} yrs)  |  "
+            f"Cultural Region: {ctx.cultural_region.replace('_', ' ').title()}  |  "
             f"Time Pressure: {ctx.time_pressure.title()}",
             "",
             f"Risk register contains {len(risk_register)} items: "
@@ -366,6 +504,8 @@ Estimated time: 3–5 minutes.
     @staticmethod
     def _print_report(report: AssessmentReport) -> None:
         ctx = report.context
+        ci = report.consultant_insights  # may be empty dict if generation failed
+
         print("\n\n" + "═" * 68)
         print("  RISK ASSESSMENT REPORT")
         print("═" * 68)
@@ -374,6 +514,31 @@ Estimated time: 3–5 minutes.
         print("─" * 40)
         print(report.summary)
 
+        # ── Consultant Persona & Benchmark ────────────────────────────────────
+        persona = ci.get("persona", {})
+        if persona:
+            print(f"\n🎭 YOUR CONSULTANT PROFILE: {persona.get('persona', '')}")
+            print("─" * 40)
+            print(f"  {persona.get('description', '')}")
+            blind_spots = persona.get("risk_blind_spots", [])
+            if blind_spots:
+                print("\n  ⚠  Your risk blind spots:")
+                for bs in blind_spots:
+                    print(f"     • {bs}")
+            prescription = persona.get("prescription", "")
+            if prescription:
+                print(f"\n  💊 Prescription: {prescription}")
+
+        # ── Time Pressure Warning ─────────────────────────────────────────────
+        tp_insights = ci.get("time_pressure_insights", {})
+        if tp_insights:
+            print(f"\n⏱  TIME PRESSURE NOTE")
+            print("─" * 40)
+            print(f"  {tp_insights.get('risk_escalation_note', '')}")
+            print(f"  {tp_insights.get('behavioral_warning', '')}")
+            print(f"  → {tp_insights.get('counter_strategy', '')}")
+
+        # ── Industry Context ──────────────────────────────────────────────────
         print("\n🏗  INDUSTRY CONTEXT  —", ctx.industry.upper())
         print("─" * 40)
         industry_data = report.industry_risks
@@ -387,6 +552,22 @@ Estimated time: 3–5 minutes.
         for r in industry_data.get("blind_spots_for_outsiders", []):
             print(f"  ⚡ {r}")
 
+        # ── Benchmarks ────────────────────────────────────────────────────────
+        benchmarks = ci.get("benchmarks", {})
+        if benchmarks:
+            print("\n📊 INDUSTRY BENCHMARKS (for your industry + region)")
+            print("─" * 40)
+            for desc, pct in benchmarks.get("common_risks_pct", {}).items():
+                print(f"  • {pct}% of PMs in your situation face: {desc}")
+            failure_rate = benchmarks.get("failure_recovery_rate")
+            if failure_rate:
+                print(f"\n  Recovery rate: {failure_rate}% of projects recover successfully from major risks")
+            blind_spot = benchmarks.get("blind_spot", "")
+            if blind_spot:
+                print(f"\n  🔍 Regional Blind Spot: {blind_spot}")
+            print(f"\n  Source: {benchmarks.get('source', 'Thesis research + industry reports')}")
+
+        # ── Experience-Level Guidance ─────────────────────────────────────────
         print("\n👤 EXPERIENCE-LEVEL GUIDANCE  —", ctx.experience_level.upper())
         print("─" * 40)
         exp = report.experience_guidance
@@ -400,22 +581,81 @@ Estimated time: 3–5 minutes.
         for a in exp.get("recommended_actions", []):
             print(f"  → {a}")
 
+        # ── Risk Register ─────────────────────────────────────────────────────
         print("\n📊 RISK REGISTER  (sorted by severity)")
         print("─" * 40)
+        enriched_risks = ci.get("enriched_risks", [])
+        enriched_map = {er["risk"].description: er for er in enriched_risks}
         for i, risk in enumerate(report.risk_register, 1):
             icon = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🟢"}.get(risk.level, "⚪")
             print(f"  {i:2}. [{risk.level:8s}] {icon} Score={risk.score:3d}  {risk.description}")
             print(f"      Category: {risk.category}  |  P={risk.probability}, I={risk.impact}, D={risk.detectability}")
             print(f"      Action: {risk.action}")
+            # Show context note if available
+            enriched = enriched_map.get(risk.description, {})
+            if enriched.get("context_note"):
+                print(f"      Context: {enriched['context_note']}")
+            # Show top citation
+            citations = enriched.get("citations", [])
+            if citations:
+                print(f"      Research: {citations[0]['reference']}")
+                print(f"               Key finding: {citations[0]['key_finding']}")
 
+        # ── Decision Frameworks ───────────────────────────────────────────────
         print("\n🧰 RECOMMENDED DECISION FRAMEWORKS")
         print("─" * 40)
-        for fw in report.framework_recommendations:
-            print(f"\n  ▸ {fw['name']}")
+        # Use enriched frameworks from consultant if available, else fall back to report
+        frameworks_to_print = ci.get("frameworks") or report.framework_recommendations
+        for fw in frameworks_to_print:
+            tier = fw.get("tier", "")
+            tier_label = f" [{tier}]" if tier else ""
+            print(f"\n  ▸ {fw['name']}{tier_label}")
             print(f"    {fw['description'][:160]}")
-            print(f"    When: {fw['when_to_apply']}")
-            print(f"    Example: {fw['example']}")
+            print(f"    When: {fw.get('when_to_apply', '')}")
+            print(f"    Example: {fw.get('example', '')}")
+            if fw.get("academic_basis"):
+                print(f"    📚 Academic basis: {fw['academic_basis']}")
+            if fw.get("context_note"):
+                print(f"    💡 For you: {fw['context_note']}")
 
+        # ── Cross-Industry Innovations ────────────────────────────────────────
+        innovations = ci.get("innovations", [])
+        if innovations:
+            print("\n🔬 NOVEL MITIGATIONS (Cross-Industry Pattern Recognition)")
+            print("─" * 40)
+            for innov in innovations[:2]:
+                print(f"\n  💡 {innov['technique']}")
+                print(f"     Borrowed from: {innov['borrowed_from']}")
+                print(f"     {innov['description'][:200]}")
+                print(f"     ROI: {innov['roi_estimate']}")
+                print(f"     Academic basis: {innov['academic_basis']}")
+
+        # ── Black Swan Warning ────────────────────────────────────────────────
+        black_swan = ci.get("black_swan", {})
+        if black_swan:
+            print("\n🦢 BLACK SWAN / TAIL RISK WARNING")
+            print("─" * 40)
+            print(f"  Scenario: {black_swan.get('event', '')}")
+            print(f"  Example: {black_swan.get('example', '')}")
+            print(f"  Probability: {black_swan.get('probability', '')}")
+            print(f"  Preparation: {black_swan.get('preparation', '')}")
+
+        # ── Regulatory Intelligence ───────────────────────────────────────────
+        reg_data = ci.get("regulatory_data", {})
+        if reg_data:
+            print("\n⚖️  REGULATORY INTELLIGENCE (current)")
+            print("─" * 40)
+            for reg in reg_data.get("active_regulations", [])[:2]:
+                print(f"  • [{reg.get('risk_level', '')}] {reg.get('name', '')}")
+                print(f"    Status: {reg.get('status', '')}")
+                print(f"    {reg.get('summary', '')}")
+            market_signals = reg_data.get("market_signals", {})
+            if market_signals:
+                print("\n  📈 Market signals:")
+                for signal, value in list(market_signals.items())[:3]:
+                    print(f"     {signal.replace('_', ' ').title()}: {value}")
+
+        # ── 20% Reality Check ────────────────────────────────────────────────
         print("\n📅 20% REALITY CHECK MILESTONE")
         print("─" * 40)
         rc = report.reality_check_plan
@@ -440,6 +680,19 @@ Estimated time: 3–5 minutes.
                 print(f"  • {c}")
             print("\nDevelopment recommendation:")
             print(f"  → {arch.get('recommended_development', '')}")
+
+        # ── Sources & Confidence ──────────────────────────────────────────────
+        confidence = ci.get("confidence", {})
+        sources_used = ci.get("sources_used", [])
+        if confidence or sources_used:
+            print("\n📚 SOURCES & CONFIDENCE")
+            print("─" * 40)
+            if confidence:
+                print(f"  Confidence: {confidence.get('score', 0)}% ({confidence.get('label', '')}) — {confidence.get('explanation', '')}")
+            if sources_used:
+                print("\n  Data sources used:")
+                for src in sources_used:
+                    print(f"    • {src}")
 
         print("\n" + "═" * 68)
         print("  Report generated by the Project Risk Assessment Agent")

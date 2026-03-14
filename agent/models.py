@@ -68,3 +68,5 @@ class AssessmentReport:
     reality_check_plan: dict
     risk_register: List[RiskItem]
     summary: str = ""
+    # Consultant insights layer (populated by ConsultantReportGenerator)
+    consultant_insights: dict = field(default_factory=dict)
