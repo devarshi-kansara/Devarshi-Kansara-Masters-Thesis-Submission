@@ -148,9 +148,72 @@ if submitted:
             "Do not proceed until these are resolved or formally accepted by your sponsor."
         )
 
+    # ── Consultant Profile & Confidence ──────────────────────────────────────
+    ci = report.consultant_insights
+    persona = ci.get("persona", {})
+    confidence = ci.get("confidence", {})
+
+    if persona or confidence:
+        with st.container():
+            st.header("🎭 Your Expert Consultant Profile")
+            p_col, c_col = st.columns([2, 1])
+            with p_col:
+                if persona:
+                    st.subheader(persona.get("persona", ""))
+                    st.markdown(persona.get("description", ""))
+                    blind_spots = persona.get("risk_blind_spots", [])
+                    if blind_spots:
+                        st.subheader("⚠️ Your Risk Blind Spots")
+                        for bs in blind_spots:
+                            st.warning(bs)
+                    prescription = persona.get("prescription", "")
+                    if prescription:
+                        st.info(f"💊 **Prescription for you:** {prescription}")
+            with c_col:
+                if confidence:
+                    score = confidence.get("score", 0)
+                    label = confidence.get("label", "")
+                    explanation = confidence.get("explanation", "")
+                    st.metric("Confidence Level", f"{score}% ({label})")
+                    st.caption(explanation)
+
+    # ── Time Pressure Warning ─────────────────────────────────────────────────
+    tp_insights = ci.get("time_pressure_insights", {})
+    if tp_insights:
+        st.header("⏱️ Time Pressure Intelligence")
+        st.warning(tp_insights.get("risk_escalation_note", ""))
+        st.info(tp_insights.get("behavioral_warning", ""))
+        st.success(f"**Counter-strategy:** {tp_insights.get('counter_strategy', '')}")
+
+    # ── Industry Benchmarks ───────────────────────────────────────────────────
+    benchmarks = ci.get("benchmarks", {})
+    if benchmarks:
+        st.header("📈 Industry Benchmarks — Your Context")
+        common_risks_pct = benchmarks.get("common_risks_pct", {})
+        if common_risks_pct:
+            st.subheader("How common are these risks in your industry + region?")
+            for desc, pct in common_risks_pct.items():
+                st.markdown(f"- **{pct}%** of PMs in your situation face: *{desc}*")
+        failure_rate = benchmarks.get("failure_recovery_rate")
+        if failure_rate:
+            st.metric("Recovery Rate", f"{failure_rate}%", help="% of projects that recover from major risks")
+        blind_spot = benchmarks.get("blind_spot", "")
+        if blind_spot:
+            st.subheader("🔍 Your Regional Blind Spot")
+            st.warning(blind_spot)
+        top_practices = benchmarks.get("top_performer_practices", [])
+        if top_practices:
+            st.subheader("🏆 What Top 10% of PMs Do Differently")
+            for p in top_practices:
+                st.markdown(f"✅ {p}")
+        st.caption(f"Source: {benchmarks.get('source', 'Thesis research + industry reports')}")
+
     # ── Risk Register ─────────────────────────────────────────────────────────
     st.header("📋 Risk Register")
     level_colors = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🟢"}
+    enriched_risks = ci.get("enriched_risks", [])
+    enriched_map = {er["risk"].description: er for er in enriched_risks}
+
     for i, risk in enumerate(report.risk_register, 1):
         icon = level_colors.get(risk.level, "⚪")
         with st.expander(f"{icon} #{i} [{risk.level}] — {risk.description}"):
@@ -160,6 +223,17 @@ if submitted:
             c3.markdown(f"**Impact:** {risk.impact}")
             c4.markdown(f"**Risk Score:** {risk.score}")
             st.info(f"**Recommended Action:** {risk.action}")
+
+            enriched = enriched_map.get(risk.description, {})
+            context_note = enriched.get("context_note", "")
+            if context_note:
+                st.markdown(f"📍 **Context for you:** {context_note}")
+
+            citations = enriched.get("citations", [])
+            if citations:
+                st.markdown("**📚 Research support:**")
+                for cite in citations[:2]:
+                    st.markdown(f"- *{cite['reference']}* — {cite['key_finding']}")
 
     # ── Industry Context ──────────────────────────────────────────────────────
     st.header(f"🏗 Industry Context — {industry}")
@@ -197,11 +271,63 @@ if submitted:
 
     # ── Decision Frameworks ───────────────────────────────────────────────────
     st.header("🧰 Decision Frameworks")
-    for fw in report.framework_recommendations:
-        with st.expander(f"▸ {fw['name']}"):
+    frameworks_to_show = ci.get("frameworks") or report.framework_recommendations
+    for fw in frameworks_to_show:
+        tier = fw.get("tier", "")
+        label = f"▸ {fw['name']}" + (f" [{tier}]" if tier else "")
+        with st.expander(label):
             st.markdown(fw["description"])
-            st.markdown(f"**When to apply:** {fw['when_to_apply']}")
-            st.markdown(f"**Example:** *{fw['example']}*")
+            st.markdown(f"**When to apply:** {fw.get('when_to_apply', '')}")
+            st.markdown(f"**Example:** *{fw.get('example', '')}*")
+            if fw.get("academic_basis"):
+                st.markdown(f"📚 **Academic basis:** {fw['academic_basis']}")
+            if fw.get("context_note"):
+                st.info(f"💡 **For you:** {fw['context_note']}")
+
+    # ── Cross-Industry Innovations ────────────────────────────────────────────
+    innovations = ci.get("innovations", [])
+    if innovations:
+        st.header("🔬 Novel Mitigations — Cross-Industry Pattern Recognition")
+        for innov in innovations:
+            with st.expander(f"💡 {innov['technique']} (from {innov['borrowed_from']})"):
+                st.markdown(innov["description"])
+                st.success(f"**ROI estimate:** {innov['roi_estimate']}")
+                st.caption(f"Academic basis: {innov['academic_basis']}")
+
+    # ── Black Swan Warning ────────────────────────────────────────────────────
+    black_swan = ci.get("black_swan", {})
+    if black_swan:
+        st.header("🦢 Black Swan / Tail Risk Warning")
+        with st.expander(f"⚠️ {black_swan.get('event', 'Unknown tail risk')}", expanded=False):
+            st.markdown(f"**Example:** {black_swan.get('example', '')}")
+            st.markdown(f"**Probability:** {black_swan.get('probability', '')}")
+            st.markdown(f"**Impact:** {black_swan.get('impact', '')}")
+            st.info(f"**How to prepare:** {black_swan.get('preparation', '')}")
+            st.caption(f"Source: {black_swan.get('source', '')}")
+
+    # ── Regulatory Intelligence ───────────────────────────────────────────────
+    reg_data = ci.get("regulatory_data", {})
+    if reg_data:
+        st.header("⚖️ Regulatory Intelligence")
+        data_freshness = ci.get("data_freshness", {})
+        if data_freshness:
+            st.caption(
+                f"Data source: {data_freshness.get('data_source', '')} | "
+                f"Last updated: {data_freshness.get('last_updated', '')} | "
+                f"Next update: {data_freshness.get('next_update', '')}"
+            )
+        reg_risk_level_icons = {"Critical": "🔴", "High": "🟠", "Medium-High": "🟠", "Medium": "🟡", "Low": "🟢"}
+        for reg in reg_data.get("active_regulations", []):
+            risk_level = reg.get("risk_level", "")
+            icon = next((v for k, v in reg_risk_level_icons.items() if k.lower() in risk_level.lower()), "⚪")
+            with st.expander(f"{icon} {reg.get('name', '')} — {reg.get('status', '')}"):
+                st.markdown(reg.get("summary", ""))
+                st.caption(f"Source: {reg.get('source', '')}")
+        market_signals = reg_data.get("market_signals", {})
+        if market_signals:
+            st.subheader("📈 Current Market Signals")
+            for signal, value in market_signals.items():
+                st.markdown(f"- **{signal.replace('_', ' ').title()}:** {value}")
 
     # ── 20% Reality Check ────────────────────────────────────────────────────
     st.header("📅 Your 20% Reality Check Milestone")
@@ -229,6 +355,13 @@ if submitted:
             st.warning(bs)
         st.subheader("Development Recommendation")
         st.info(arch.get("recommended_development", ""))
+
+    # ── Sources Used ─────────────────────────────────────────────────────────
+    sources_used = ci.get("sources_used", [])
+    if sources_used:
+        st.header("📚 Sources Used in This Report")
+        for src in sources_used:
+            st.markdown(f"- {src}")
 
     st.divider()
     st.caption(
