@@ -4,7 +4,7 @@ Data models for the risk assessment agent.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -21,6 +21,19 @@ class RiskItem:
     score: int = 0
     level: str = ""
     action: str = ""
+    # ── Personalisation fields (Phase 1) ─────────────────────────────────────
+    benchmark: Optional[Dict] = None
+    """Frequency / success / failure / cost benchmark data for this risk type."""
+    blind_spot: Optional[str] = None
+    """Specific blind-spot warning for the user's profile (region + experience)."""
+    novel_mitigation: Optional[str] = None
+    """Cross-industry or novel mitigation insight beyond the standard action."""
+    academic_source: Optional[str] = None
+    """Academic citation supporting the risk identification or mitigation."""
+    cross_industry_insight: Optional[str] = None
+    """Pattern or technique from another industry that applies to this risk."""
+    confidence: float = 0.85
+    """Confidence level (0–1) for this risk's scoring and recommendations."""
 
     def __post_init__(self) -> None:
         from agent.knowledge_base import get_risk_level
@@ -68,3 +81,14 @@ class AssessmentReport:
     reality_check_plan: dict
     risk_register: List[RiskItem]
     summary: str = ""
+    # ── Personalisation fields (Phase 1) ─────────────────────────────────────
+    persona_profile: Optional[Dict] = None
+    """Deep persona analysis from ContextAnalyzer."""
+    benchmarks: Optional[Dict] = None
+    """Industry benchmarks by risk type from ContextAnalyzer."""
+    frameworks_with_rationale: List[dict] = field(default_factory=list)
+    """Frameworks enriched with WHY for this specific user."""
+    cultural_insights: Optional[Dict] = None
+    """Region-specific insights and cultural risk patterns."""
+    consultant_narrative: Optional[str] = None
+    """Formatted narrative consultant report."""
