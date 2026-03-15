@@ -214,6 +214,18 @@ class RiskAssessmentAgent:
         # ── Enrich individual risk items ──────────────────────────────────────
         self._enrich_risk_items(report)
 
+        # ── ECC supplementary enrichment (optional) ───────────────────────────
+        try:
+            from agent.ecc_integration import EccResearchBridge, is_ecc_available  # lazy
+            if is_ecc_available():
+                self._enrich_with_ecc_data(report, ctx, EccResearchBridge())
+                sources_used.append("ECC deep-research")
+                sources_used.append("ECC market-research")
+        except ImportError:
+            logger.info("ECC skills not installed — enrichment skipped.")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ECC enrichment failed unexpectedly: %s", exc)
+
         # ── Metadata ──────────────────────────────────────────────────────────
         report.live_data_timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         report.data_sources_used = list(dict.fromkeys(sources_used))  # deduplicated
@@ -260,6 +272,31 @@ class RiskAssessmentAgent:
                     f"{paper.get('title', '')}. "
                     f"arXiv. {paper.get('url', '')}"
                 )
+
+    def _enrich_with_ecc_data(
+        self,
+        report: AssessmentReport,
+        ctx: ProjectContext,
+        bridge: Any,
+    ) -> None:
+        """Call ECC skills to add supplementary enrichment to each risk item.
+
+        This method is only invoked when :func:`~agent.ecc_integration.is_ecc_available`
+        returns ``True``.  All errors are caught by the caller so failures
+        never propagate up to :meth:`generate_report`.
+        """
+        for risk in report.risk_register:
+            papers = bridge.enrich_risk_academic(
+                risk.description, ctx.industry
+            )
+            market_val = bridge.validate_risk_market_data(
+                risk.description, ctx.industry
+            )
+            confidence = bridge.compute_ecc_confidence_score(papers, market_val)
+
+            risk.ecc_research_papers = papers
+            risk.ecc_market_validation = market_val
+            risk.ecc_confidence_score = confidence
 
     def run_interactive_session(self) -> AssessmentReport:
         """Run a full conversational interview in the terminal and return the report."""
