@@ -214,6 +214,9 @@ class RiskAssessmentAgent:
         # ── Enrich individual risk items ──────────────────────────────────────
         self._enrich_risk_items(report)
 
+        # ── Optional ECC enrichment ───────────────────────────────────────────
+        self._enrich_with_ecc(report, ctx, sources_used)
+
         # ── Metadata ──────────────────────────────────────────────────────────
         report.live_data_timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         report.data_sources_used = list(dict.fromkeys(sources_used))  # deduplicated
@@ -260,6 +263,85 @@ class RiskAssessmentAgent:
                     f"{paper.get('title', '')}. "
                     f"arXiv. {paper.get('url', '')}"
                 )
+
+    def _enrich_with_ecc(
+        self,
+        report: AssessmentReport,
+        ctx: ProjectContext,
+        sources_used: List[str],
+    ) -> None:
+        """Optionally enrich report risk items using ECC skills.
+
+        Failures are caught and logged; the report is never broken by an ECC error.
+        When ECC is unavailable, this method is a no-op.
+        """
+        try:
+            from agent.ecc_integration import ECCIntegration, ecc_available  # lazy import
+        except ImportError:
+            return
+
+        if not ecc_available():
+            return
+
+        try:
+            from agent.cache_manager import CacheManager  # lazy import
+            cache = CacheManager()
+        except Exception:  # noqa: BLE001
+            cache = None
+
+        try:
+            ecc = ECCIntegration(cache_manager=cache)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ECCIntegration init failed: %s", exc)
+            return
+
+        ecc_academic_enriched = False
+        ecc_market_enriched = False
+
+        for risk in report.risk_register:
+            # ── ECC academic enrichment ───────────────────────────────────────
+            try:
+                papers = ecc.enrich_risk_academic(risk, industry=ctx.industry)
+                risk.ecc_research_papers = papers
+                if papers:
+                    ecc_academic_enriched = True
+                    if not risk.academic_citation:
+                        # Use ECC paper as citation fallback when internet_fetcher found none
+                        paper = papers[0]
+                        pub_year = (paper.get("published") or "")[:4] or "n.d."
+                        risk.academic_citation = (
+                            f"{paper.get('authors', 'Unknown')} ({pub_year}). "
+                            f"{paper.get('title', '')}. "
+                            f"ECC deep-research. {paper.get('url', '')}"
+                        )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ECC academic enrichment failed for '%s': %s",
+                               risk.description[:50], exc)
+
+            # ── ECC market validation ─────────────────────────────────────────
+            try:
+                validation = ecc.validate_risk_market_data(risk, industry=ctx.industry)
+                risk.ecc_market_validation = validation
+                confidence = validation.get("confidence", "unavailable")
+                if confidence not in ("unavailable", "low"):
+                    ecc_market_enriched = True
+                    # Map ECC confidence to a numeric score: high=0.9, medium=0.6
+                    risk.ecc_confidence_score = 0.9 if confidence == "high" else 0.6
+                    if not risk.market_signal and validation.get("market_evidence"):
+                        evidence = validation["market_evidence"]
+                        first = evidence[0] if evidence else {}
+                        if isinstance(first, dict):
+                            risk.market_signal = first.get("title") or first.get("summary", "")
+                        elif isinstance(first, str):
+                            risk.market_signal = first
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ECC market validation failed for '%s': %s",
+                               risk.description[:50], exc)
+
+        if ecc_academic_enriched:
+            sources_used.append("ECC deep-research")
+        if ecc_market_enriched:
+            sources_used.append("ECC market-research")
 
     def run_interactive_session(self) -> AssessmentReport:
         """Run a full conversational interview in the terminal and return the report."""
