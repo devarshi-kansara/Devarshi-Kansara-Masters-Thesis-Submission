@@ -242,7 +242,18 @@ if submitted:
         st.header("💰 Market Signals")
         news_signals = report.market_signals.get("news_signals", [])
         macro = report.market_signals.get("macro_indicators", [])
+        commodity = report.market_signals.get("commodity_signals", [])
+        if commodity:
+            st.subheader("Industry Price Indicators")
+            cols = st.columns(min(len(commodity), 4))
+            for col, ind in zip(cols, commodity):
+                label = ind.get("indicator", "")
+                value = ind.get("value", "N/A")
+                trend = ind.get("trend", "")
+                col.metric(label, value, delta=trend if trend else None)
+                col.caption(f"Source: {ind.get('source', 'Industry Index')}")
         if macro:
+            st.subheader("Macro Indicators")
             cols = st.columns(len(macro))
             for col, ind in zip(cols, macro):
                 label = ind.get("indicator", "").replace("_", " ").title()

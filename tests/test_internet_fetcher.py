@@ -246,6 +246,162 @@ class TestNewsAggregator:
         assert "construction" in ranked[0].title.lower()
 
 
+# ── Industry Relevance tests (8) ─────────────────────────────────────────────
+
+class TestIndustryRelevance:
+    """
+    Verify that each industry returns only relevant data and no
+    cross-industry contamination occurs.
+    """
+
+    # ── InternetDataFetcher relevance ─────────────────────────────────────────
+
+    _CONSTRUCTION_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <item><title>Building permit delays hit German construction industry</title>
+        <link>https://example.com/c1</link><pubDate>Mon, 10 Mar 2026 09:00:00 GMT</pubDate></item>
+  <item><title>Steel prices surge 8% in European construction market</title>
+        <link>https://example.com/c2</link><pubDate>Tue, 11 Mar 2026 09:00:00 GMT</pubDate></item>
+  <item><title>GDPR fines hit record high for tech companies</title>
+        <link>https://example.com/it1</link><pubDate>Wed, 12 Mar 2026 09:00:00 GMT</pubDate></item>
+</channel></rss>"""
+
+    _IT_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <item><title>Ransomware attack exposes 1 million patient records</title>
+        <link>https://example.com/it1</link><pubDate>Mon, 10 Mar 2026 09:00:00 GMT</pubDate></item>
+  <item><title>NIS2 compliance deadline forces IT security overhaul</title>
+        <link>https://example.com/it2</link><pubDate>Tue, 11 Mar 2026 09:00:00 GMT</pubDate></item>
+  <item><title>Lumber prices rise on construction demand</title>
+        <link>https://example.com/c1</link><pubDate>Wed, 12 Mar 2026 09:00:00 GMT</pubDate></item>
+</channel></rss>"""
+
+    _ARXIV_CONSTRUCTION = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Risk Factors in Early-Stage Construction Projects</title>
+    <author><name>Alice Smith</name></author>
+    <summary>Construction project risk management in the first 20% of the lifecycle.</summary>
+    <published>2024-03-01T00:00:00Z</published>
+    <link rel="alternate" href="https://arxiv.org/abs/2403.00001"/>
+  </entry>
+  <entry>
+    <title>Stable Topology in Exactly Flat Bands</title>
+    <author><name>Bob Jones</name></author>
+    <summary>Mathematical analysis of flat band topological invariants.</summary>
+    <published>2024-03-02T00:00:00Z</published>
+    <link rel="alternate" href="https://arxiv.org/abs/2403.00002"/>
+  </entry>
+</feed>"""
+
+    @pytest.fixture
+    def fetcher(self, tmp_path):
+        cache = CacheManager(cache_dir=str(tmp_path))
+        return InternetDataFetcher(cache_manager=cache)
+
+    def test_regulatory_updates_filter_by_industry(self, fetcher):
+        """Regulatory results are filtered to keep only industry-relevant items."""
+        with patch("agent.internet_fetcher._fetch_url", return_value=self._CONSTRUCTION_RSS):
+            result = fetcher.fetch_regulatory_updates("construction", "Germany")
+        titles = [item["title"].lower() for item in result["items"]]
+        # GDPR (IT-specific) should be filtered out; construction items kept
+        assert all("gdpr" not in t for t in titles), (
+            "IT-specific GDPR item should be filtered from construction regulatory updates"
+        )
+
+    def test_market_signals_include_commodity_data_for_construction(self, fetcher):
+        """Market signals for construction include industry-specific commodity prices."""
+        with patch("agent.internet_fetcher._fetch_url", return_value=None):
+            result = fetcher.fetch_market_signals("construction")
+        commodity = result.get("commodity_signals", [])
+        assert len(commodity) > 0, "Construction market signals should include commodity prices"
+        indicators = [c["indicator"].lower() for c in commodity]
+        assert any("steel" in ind or "lumber" in ind or "concrete" in ind for ind in indicators), (
+            "Construction commodity signals should include steel/lumber/concrete prices"
+        )
+
+    def test_market_signals_include_commodity_data_for_manufacturing(self, fetcher):
+        """Market signals for manufacturing include manufacturing-specific indicators."""
+        with patch("agent.internet_fetcher._fetch_url", return_value=None):
+            result = fetcher.fetch_market_signals("manufacturing")
+        commodity = result.get("commodity_signals", [])
+        assert len(commodity) > 0
+        indicators = [c["indicator"].lower() for c in commodity]
+        assert any("semiconductor" in ind or "aluminum" in ind or "copper" in ind for ind in indicators)
+
+    def test_market_signals_include_commodity_data_for_it(self, fetcher):
+        """Market signals for IT include IT-specific indicators."""
+        with patch("agent.internet_fetcher._fetch_url", return_value=None):
+            result = fetcher.fetch_market_signals("it")
+        commodity = result.get("commodity_signals", [])
+        assert len(commodity) > 0
+        indicators = [c["indicator"].lower() for c in commodity]
+        assert any("breach" in ind or "cloud" in ind or "cyber" in ind for ind in indicators)
+
+    def test_academic_research_filters_irrelevant_papers(self, fetcher):
+        """arXiv papers are filtered so non-industry papers are excluded when industry is given."""
+        with patch("agent.internet_fetcher._fetch_url", return_value=self._ARXIV_CONSTRUCTION):
+            result = fetcher.fetch_academic_research(["risk"], industry="construction")
+        papers = result.get("papers", [])
+        titles = [p["title"].lower() for p in papers]
+        # Topology paper should be filtered out; construction paper should remain
+        assert not any("topology" in t or "flat band" in t for t in titles), (
+            "Non-construction arXiv papers should be filtered out"
+        )
+        assert any("construction" in t for t in titles)
+
+    def test_academic_research_no_industry_returns_all_papers(self, fetcher):
+        """When industry is not specified, no filtering is applied (backward compat)."""
+        with patch("agent.internet_fetcher._fetch_url", return_value=self._ARXIV_CONSTRUCTION):
+            result = fetcher.fetch_academic_research(["risk"])
+        # Should return all papers (no filtering without industry)
+        assert len(result.get("papers", [])) == 2
+
+    # ── NewsAggregator relevance ──────────────────────────────────────────────
+
+    def test_news_aggregator_filters_irrelevant_articles(self):
+        """aggregate_industry_news excludes articles with zero relevance score."""
+        from agent.news_aggregator import NewsAggregator
+
+        mock_fetcher = MagicMock(spec=InternetDataFetcher)
+        mock_fetcher.fetch_industry_news.return_value = {
+            "items": [
+                {"title": "Building permit delays hit construction sites", "url": "https://a.com/1", "date": "2026-03-10"},
+                {"title": "Stock market volatility continues on Wall Street", "url": "https://a.com/2", "date": "2026-03-09"},
+                {"title": "Celebrity news: actor wins award", "url": "https://a.com/3", "date": "2026-03-08"},
+            ],
+            "sources": ["Google News RSS"],
+        }
+        mock_fetcher.fetch_regulatory_updates.return_value = {"items": [], "sources": []}
+
+        aggregator = NewsAggregator(fetcher=mock_fetcher)
+        items = aggregator.aggregate_industry_news("construction", top_n=5)
+        titles = [i.title.lower() for i in items]
+        # Generic / celebrity news with no construction keywords should be filtered
+        assert not any("celebrity" in t or "actor" in t or "award" in t for t in titles)
+
+    def test_no_cross_contamination_construction_vs_it(self):
+        """Construction queries should not return IT-specific results."""
+        from agent.news_aggregator import NewsAggregator
+
+        mock_fetcher = MagicMock(spec=InternetDataFetcher)
+        mock_fetcher.fetch_industry_news.return_value = {
+            "items": [
+                {"title": "GDPR breach fine hits tech company", "url": "https://a.com/it1", "date": "2026-03-10"},
+                {"title": "Ransomware attack on cloud provider", "url": "https://a.com/it2", "date": "2026-03-09"},
+                {"title": "Construction material prices surge", "url": "https://a.com/c1", "date": "2026-03-08"},
+            ],
+            "sources": ["Google News RSS"],
+        }
+        mock_fetcher.fetch_regulatory_updates.return_value = {"items": [], "sources": []}
+
+        aggregator = NewsAggregator(fetcher=mock_fetcher)
+        items = aggregator.aggregate_industry_news("construction", top_n=5)
+        titles = [i.title.lower() for i in items]
+        # IT-only articles should rank below construction articles and be filtered
+        assert items[0].title.lower() == "construction material prices surge"
+
+
 # ── Integration: RiskAgent + live data (3) ────────────────────────────────────
 
 class TestRiskAgentLiveDataIntegration:

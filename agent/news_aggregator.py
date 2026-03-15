@@ -104,10 +104,16 @@ class NewsAggregator:
         # Rank and deduplicate
         ranked = self.rank_by_relevance(news_items, {"industry": industry, "region": region})
 
+        # Remove articles with zero relevance score to avoid cross-contamination
+        relevant = [item for item in ranked if item.relevance_score > 0]
+        # Fall back to all ranked items if none matched (e.g. unknown industry)
+        if not relevant:
+            relevant = ranked
+
         # Deduplicate by title (case-insensitive)
         seen: set = set()
         unique: List[NewsItem] = []
-        for item in ranked:
+        for item in relevant:
             key = item.title.lower()
             if key not in seen:
                 seen.add(key)

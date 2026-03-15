@@ -195,7 +195,7 @@ class RiskAssessmentAgent:
         try:
             risk_kws = [r.description.split()[0] for r in report.risk_register[:3]]
             risk_kws.append(ctx.industry)
-            research = fetcher.fetch_academic_research(risk_kws)
+            research = fetcher.fetch_academic_research(risk_kws, industry=ctx.industry)
             report.academic_research = research.get("papers", [])
             sources_used.extend(research.get("sources", []))
         except Exception as exc:  # noqa: BLE001
