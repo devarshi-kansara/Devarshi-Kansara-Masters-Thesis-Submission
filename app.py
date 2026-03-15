@@ -334,14 +334,14 @@ if submitted:
     rc = report.reality_check_plan
     st.info(rc["description"])
     st.subheader("Workshop Agenda")
-    for item in rc.get("agenda_items", []):
-        st.checkbox(item, key=item)
+    for idx, item in enumerate(rc.get("agenda_items", [])):
+        st.checkbox(item, key=f"agenda_{idx}")
     st.success(f"**Expected output:** {rc.get('output', '')}")
 
     # ── First 20% Action Checklist ────────────────────────────────────────────
     st.header(f"🚀 First 20% Action Checklist — {industry}")
-    for action in ind_data.get("first_20_percent_actions", []):
-        st.checkbox(action, key=action)
+    for idx, action in enumerate(ind_data.get("first_20_percent_actions", [])):
+        st.checkbox(action, key=f"action_{idx}")
 
     # ── Cultural Archetype ────────────────────────────────────────────────────
     arch = CULTURAL_ARCHETYPES.get(ctx.cultural_region)
