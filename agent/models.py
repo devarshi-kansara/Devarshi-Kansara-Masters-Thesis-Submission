@@ -4,7 +4,7 @@ Data models for the risk assessment agent.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -28,6 +28,10 @@ class RiskItem:
     regulatory_status: Optional[str] = None  # Current compliance note
     market_signal: Optional[str] = None      # Price / labour trend snippet
     academic_citation: Optional[str] = None  # APA-style citation with URL
+    # ECC-sourced enrichment fields (populated by ECCIntegration when available)
+    ecc_research_papers: List[Dict[str, str]] = field(default_factory=list)
+    ecc_market_validation: Dict[str, Any] = field(default_factory=dict)
+    ecc_confidence_score: float = 0.0  # 0.0 means "not assessed by ECC"
 
     def __post_init__(self) -> None:
         from agent.knowledge_base import get_risk_level
