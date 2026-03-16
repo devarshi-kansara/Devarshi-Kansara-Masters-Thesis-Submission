@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+
+{% block title %}Interview — Project Risk Assessment Agent{% endblock %}
+
+{% block content %}
+<div class="container container-narrow">
+
+  <div class="page-header">
+    <h1>📝 Risk Assessment Interview</h1>
+    <p class="page-subtitle">
+      Complete the four sections below to receive your personalised risk report.
+      The whole form takes about <strong>2–3 minutes</strong>.
+    </p>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="progress-bar-wrap">
+    <div class="progress-bar" style="width: 0%"></div>
+  </div>
+  <div class="progress-labels">
+    <span>Background</span>
+    <span>Risks</span>
+    <span>Style</span>
+    <span>Pressure</span>
+  </div>
+
+  <form method="POST" action="{{ url_for('generate_report') }}" id="interview-form" novalidate>
+
+    <!-- ── SECTION 1: Background ──────────────────────────────────────────── -->
+    <div class="form-section" id="section-1">
+      <div class="form-section-header">
+        <span class="section-badge">Section 1 of 4</span>
+        <h2>Your Background</h2>
+      </div>
+
+      <div class="form-grid">
+
+        <div class="form-group">
+          <label for="industry">Industry <span class="required">*</span></label>
+          <select name="industry" id="industry" class="form-control" required>
+            <option value="">— Select industry —</option>
+            <option value="construction"
+              {% if prefill.get('industry') == 'construction' %}selected{% endif %}>
+              🏗 Construction
+            </option>
+            <option value="manufacturing"
+              {% if prefill.get('industry') == 'manufacturing' %}selected{% endif %}>
+              🏭 Manufacturing
+            </option>
+            <option value="it"
+              {% if prefill.get('industry') == 'it' %}selected{% endif %}>
+              💻 IT / Software
+            </option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="years_experience">
+            Years of PM Experience <span class="required">*</span>
+          </label>
+          <input
+            type="number"
+            name="years_experience"
+            id="years_experience"
+            class="form-control"
+            min="0"
+            max="60"
+            value="{{ prefill.get('years_experience', '') }}"
+            placeholder="e.g. 8"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="projects_managed">Projects Managed to Completion</label>
+          <input
+            type="number"
+            name="projects_managed"
+            id="projects_managed"
+            class="form-control"
+            min="0"
+            max="500"
+            value="{{ prefill.get('projects_managed', '') }}"
+            placeholder="e.g. 15"
+          />
+        </div>
+
+        <div class="form-group form-group-full">
+          <label for="cultural_region">Primary Work Region / Country</label>
+          <input
+            type="text"
+            name="cultural_region"
+            id="cultural_region"
+            class="form-control"
+            value="{{ prefill.get('cultural_region', '') }}"
+            placeholder="e.g. Germany, India, USA"
+          />
+          <span class="form-hint">
+            Used to identify your cultural risk archetype (Process Guardian vs. Resource Navigator).
+          </span>
+        </div>
+
+      </div>
+    </div><!-- /section-1 -->
+
+    <!-- ── SECTION 2: Early Risk Focus ───────────────────────────────────── -->
+    <div class="form-section" id="section-2">
+      <div class="form-section-header">
+        <span class="section-badge">Section 2 of 4</span>
+        <h2>Early Risk Focus</h2>
+      </div>
+
+      <p class="section-intro">
+        What are the <strong>top three risks</strong> you're most concerned about at the start
+        of this project? (Leave blank if unsure — the agent will fill in industry defaults.)
+      </p>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="risk1">Top Risk #1</label>
+          <input
+            type="text"
+            name="risk1"
+            id="risk1"
+            class="form-control"
+            value="{{ prefill.get('top_risks', ['', '', ''])[0] if prefill.get('top_risks') else '' }}"
+            placeholder="e.g. unexpected soil conditions"
+          />
+        </div>
+        <div class="form-group">
+          <label for="risk2">Top Risk #2</label>
+          <input
+            type="text"
+            name="risk2"
+            id="risk2"
+            class="form-control"
+            value="{{ prefill.get('top_risks', ['', '', ''])[1] if prefill.get('top_risks') and prefill['top_risks']|length > 1 else '' }}"
+            placeholder="e.g. permit delays"
+          />
+        </div>
+        <div class="form-group">
+          <label for="risk3">Top Risk #3</label>
+          <input
+            type="text"
+            name="risk3"
+            id="risk3"
+            class="form-control"
+            value="{{ prefill.get('top_risks', ['', '', ''])[2] if prefill.get('top_risks') and prefill['top_risks']|length > 2 else '' }}"
+            placeholder="e.g. subcontractor overruns"
+          />
+        </div>
+      </div>
+
+      <div class="form-group form-group-full">
+        <label>These risks are mostly: <span class="required">*</span></label>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input
+              type="radio"
+              name="risk_locus"
+              value="internal"
+              {% if prefill.get('risk_locus') == 'internal' %}checked{% endif %}
+            />
+            <span class="radio-text">
+              <strong>Inside the project</strong> — controllable by the team
+            </span>
+          </label>
+          <label class="radio-label">
+            <input
+              type="radio"
+              name="risk_locus"
+              value="external"
+              {% if prefill.get('risk_locus') == 'external' %}checked{% endif %}
+            />
+            <span class="radio-text">
+              <strong>Outside the project</strong> — market, regulation, weather, etc.
+            </span>
+          </label>
+          <label class="radio-label">
+            <input
+              type="radio"
+              name="risk_locus"
+              value="mixed"
+              {% if prefill.get('risk_locus', 'mixed') == 'mixed' %}checked{% endif %}
+            />
+            <span class="radio-text">
+              <strong>A mix of both</strong>
+            </span>
+          </label>
+        </div>
+      </div>
+
+    </div><!-- /section-2 -->
+
+    <!-- ── SECTION 3: Decision Style ─────────────────────────────────────── -->
+    <div class="form-section" id="section-3">
+      <div class="form-section-header">
+        <span class="section-badge">Section 3 of 4</span>
+        <h2>Intuition vs. Tools</h2>
+      </div>
+
+      <div class="form-group">
+        <label>
+          When deciding which risks to take seriously, you rely on:
+          <span class="required">*</span>
+        </label>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input
+              type="radio"
+              name="decision_style"
+              value="intuition"
+              {% if prefill.get('decision_style') == 'intuition' %}checked{% endif %}
+            />
+            <span class="radio-text">
+              <strong>Mostly experience and intuition</strong> — gut feel from past projects
+            </span>
+          </label>
+          <label class="radio-label">
+            <input
+              type="radio"
+              name="decision_style"
+              value="balance"
+              {% if prefill.get('decision_style', 'balance') == 'balance' %}checked{% endif %}
+            />
+            <span class="radio-text">
+              <strong>A balance of intuition and tools</strong> — I use both
+            </span>
+          </label>
+          <label class="radio-label">
+            <input
+              type="radio"
+              name="decision_style"
+              value="formal_tools"
+              {% if prefill.get('decision_style') == 'formal_tools' %}checked{% endif %}
+            />
+            <span class="radio-text">
+              <strong>Mostly formal tools and methods</strong> — FMEA, risk matrices, etc.
+            </span>
+          </label>
+        </div>
+      </div>
+    </div><!-- /section-3 -->
+
+    <!-- ── SECTION 4: Time Pressure ──────────────────────────────────────── -->
+    <div class="form-section" id="section-4">
+      <div class="form-section-header">
+        <span class="section-badge">Section 4 of 4</span>
+        <h2>Time Pressure</h2>
+      </div>
+
+      <div class="form-group">
+        <label>
+          How much time pressure are you under at the start of this project?
+          <span class="required">*</span>
+        </label>
+        <div class="radio-group radio-group-horizontal">
+          <label class="radio-label radio-card">
+            <input
+              type="radio"
+              name="time_pressure"
+              value="low"
+              {% if prefill.get('time_pressure') == 'low' %}checked{% endif %}
+            />
+            <span class="radio-text">
+              <strong>🟢 Low</strong><br/>
+              <small>Enough time to do things right</small>
+            </span>
+          </label>
+          <label class="radio-label radio-card">
+            <input
+              type="radio"
+              name="time_pressure"
+              value="medium"
+              {% if prefill.get('time_pressure', 'medium') == 'medium' %}checked{% endif %}
+            />
+            <span class="radio-text">
+              <strong>🟡 Medium</strong><br/>
+              <small>Some pressure but manageable</small>
+            </span>
+          </label>
+          <label class="radio-label radio-card">
+            <input
+              type="radio"
+              name="time_pressure"
+              value="high"
+              {% if prefill.get('time_pressure') == 'high' %}checked{% endif %}
+            />
+            <span class="radio-text">
+              <strong>🔴 High</strong><br/>
+              <small>Tight deadlines, cutting corners is tempting</small>
+            </span>
+          </label>
+        </div>
+      </div>
+    </div><!-- /section-4 -->
+
+    <!-- Submit -->
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary btn-large btn-submit">
+        🔍 Generate Risk Assessment
+      </button>
+      <p class="form-actions-hint">
+        Your report will be ready immediately &mdash; no account required.
+      </p>
+    </div>
+
+  </form>
+</div>
+
+<script>
+  // Lightweight progress bar update based on filled fields
+  (function () {
+    var bar = document.querySelector('.progress-bar');
+
+    function updateProgress() {
+      var filled = 0;
+      // Section 1: industry + years_experience
+      if (document.getElementById('industry').value) filled++;
+      if (document.getElementById('years_experience').value) filled++;
+      // Section 2: risk_locus radio
+      if (document.querySelector('input[name="risk_locus"]:checked')) filled++;
+      // Section 3: decision_style radio
+      if (document.querySelector('input[name="decision_style"]:checked')) filled++;
+      // Section 4: time_pressure radio
+      if (document.querySelector('input[name="time_pressure"]:checked')) filled++;
+
+      var pct = Math.round((filled / 5) * 100);
+      bar.style.width = pct + '%';
+    }
+
+    document.getElementById('interview-form').addEventListener('change', updateProgress);
+    document.getElementById('interview-form').addEventListener('input', updateProgress);
+    updateProgress();
+  })();
+</script>
+{% endblock %}

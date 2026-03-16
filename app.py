@@ -1,375 +1,343 @@
 """
-Streamlit web interface for the Project Risk Assessment Agent.
+Flask web interface for the Project Risk Assessment Agent.
 
 Run with:
-    streamlit run app.py
+    python app.py
+
+Then open http://localhost:5000 in your browser.
 """
 from __future__ import annotations
 
-import streamlit as st
+import io
+import os
 
-from agent.knowledge_base import CULTURAL_ARCHETYPES, DECISION_FRAMEWORKS, REALITY_CHECK_FRAMEWORK
+from flask import (
+    Flask,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
+
+from agent.knowledge_base import CULTURAL_ARCHETYPES
 from agent.risk_agent import RiskAssessmentAgent
 
-st.set_page_config(
-    page_title="Project Risk Assessment Agent",
-    page_icon="🏗",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "risk-assessment-dev-key-change-in-production")
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.title("🏗 Risk Assessment Agent")
-    st.caption(
-        "Based on the thesis:\n"
-        "*Understanding Risk Awareness and Decision Making in "
-        "Early-Stage Project Planning*\n\n"
-        "Devarshi Kansara — HDBW, 2026"
-    )
-    st.divider()
-    st.info(
-        "Fill in the form on the right to receive a personalised "
-        "risk assessment for the **critical first 20%** of your project."
-    )
-    st.divider()
-    if st.button("🔄 Clear Data Cache", help="Force re-fetch of all live internet data on next report generation."):
-        try:
-            from agent.cache_manager import CacheManager
-            removed = CacheManager().clear_old_cache()
-            st.success(f"Cache cleared ({removed} stale entries removed). Next report will fetch fresh data.")
-        except Exception:
-            st.warning("Could not clear cache.")
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-# ── Page header ───────────────────────────────────────────────────────────────
-st.title("📋 Early-Stage Project Risk Assessment")
-st.subheader("First 20% Risk Identification Tool")
-st.markdown(
-    "Research shows that **~70% of project failures** are caused by decisions "
-    "made in the first 20% of the project lifecycle. This tool helps you identify, "
-    "prioritise, and address risks *before* they become physically irreversible."
-)
-st.divider()
+_INDUSTRY_MAP = {
+    "construction": "construction",
+    "manufacturing": "manufacturing",
+    "it": "it",
+}
 
-# ── Input form ────────────────────────────────────────────────────────────────
-with st.form("risk_form"):
-    st.subheader("Section 1 — Your Background")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        industry = st.selectbox(
-            "Industry",
-            ["Construction", "Manufacturing", "IT / Software"],
-            help="Select the industry of your current project.",
-        )
-    with col2:
-        years_experience = st.slider("Years of PM experience", 0, 40, 5)
-    with col3:
-        projects_managed = st.slider("Projects managed to completion", 0, 100, 10)
+_LOCUS_MAP = {
+    "internal": "internal",
+    "external": "external",
+    "mixed": "mixed",
+}
 
-    cultural_region = st.text_input(
-        "Primary work region / country",
-        value="Germany",
-        help="Used to identify your cultural risk archetype (e.g., Germany, India, USA).",
-    )
+_STYLE_MAP = {
+    "intuition": "intuition",
+    "balance": "balance",
+    "formal_tools": "formal_tools",
+}
 
-    st.subheader("Section 2 — Early Risk Focus")
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
-        risk1 = st.text_input("Top Risk #1", placeholder="e.g., unexpected soil conditions")
-    with col_b:
-        risk2 = st.text_input("Top Risk #2", placeholder="e.g., permit delays")
-    with col_c:
-        risk3 = st.text_input("Top Risk #3", placeholder="e.g., subcontractor overruns")
+_LEVEL_ICONS = {
+    "Critical": "🔴",
+    "High": "🟠",
+    "Medium": "🟡",
+    "Low": "🟢",
+}
 
-    risk_locus = st.radio(
-        "These risks are mostly:",
-        ["Inside the project (controllable)", "Outside the project (uncontrollable)", "A mix of both"],
-        horizontal=True,
-    )
 
-    st.subheader("Section 3 — Intuition vs. Tools")
-    decision_style = st.radio(
-        "When deciding which risks to take seriously, you rely on:",
-        ["Mostly experience and intuition", "A balance of intuition and tools", "Mostly formal tools and methods"],
-        horizontal=True,
-        index=1,
-    )
-
-    st.subheader("Section 4 — Time Pressure")
-    time_pressure = st.select_slider(
-        "Time pressure at project start",
-        options=["Low", "Medium", "High"],
-        value="Medium",
-    )
-
-    submitted = st.form_submit_button("🔍 Generate Risk Assessment", use_container_width=True)
-
-# ── Process & display report ──────────────────────────────────────────────────
-if submitted:
-    # Map form values to agent keys
-    industry_map = {"Construction": "construction", "Manufacturing": "manufacturing", "IT / Software": "it"}
-    locus_map = {
-        "Inside the project (controllable)": "internal",
-        "Outside the project (uncontrollable)": "external",
-        "A mix of both": "mixed",
-    }
-    style_map = {
-        "Mostly experience and intuition": "intuition",
-        "A balance of intuition and tools": "balance",
-        "Mostly formal tools and methods": "formal_tools",
-    }
-
-    top_risks = [r for r in [risk1, risk2, risk3] if r.strip()]
+def _build_report_from_session():
+    """Rebuild the AssessmentReport from form data stored in the session."""
+    form_data = session.get("form_data")
+    if not form_data:
+        return None, None
 
     agent = RiskAssessmentAgent()
     ctx = agent.build_context(
-        industry=industry_map[industry],
-        years_experience=years_experience,
-        projects_managed=projects_managed,
-        cultural_region=cultural_region,
-        top_risks=top_risks,
-        risk_locus=locus_map[risk_locus],
-        decision_style=style_map[decision_style],
-        time_pressure=time_pressure.lower(),
+        industry=form_data["industry"],
+        years_experience=form_data["years_experience"],
+        projects_managed=form_data["projects_managed"],
+        cultural_region=form_data["cultural_region"],
+        top_risks=form_data["top_risks"],
+        risk_locus=form_data["risk_locus"],
+        decision_style=form_data["decision_style"],
+        time_pressure=form_data["time_pressure"],
     )
+    report = agent.generate_report(ctx, fetch_live_data=False)
+    return ctx, report
 
-    # ── Fetch live internet data with spinner feedback ────────────────────────
-    with st.status("📡 Fetching live data...", expanded=True) as status:
-        st.write("📡 Fetching live regulatory data...")
-        st.write("📰 Scanning industry news...")
-        st.write("💰 Collecting market signals...")
-        st.write("📚 Searching academic research...")
-        st.write("⚠️ Checking geopolitical alerts...")
-        report = agent.generate_report(ctx, fetch_live_data=True)
-        status.update(label="✅ Live data fetched!", state="complete", expanded=False)
 
-    live_ok = bool(report.live_data_timestamp)
+# ── Routes ────────────────────────────────────────────────────────────────────
 
-    st.success("✅ Assessment complete! Scroll down to review your personalised risk report.")
-    if live_ok:
-        ts = report.live_data_timestamp or ""
-        sources = ", ".join(report.data_sources_used) if report.data_sources_used else "None"
-        st.info(
-            f"🌐 **Live data integrated** · Last updated: {ts} · "
-            f"Sources: {sources}"
-        )
-    else:
-        st.warning(
-            "⚠️ Some live data unavailable — using cached/local data. "
-            "The risk assessment is still complete based on the knowledge base."
-        )
-    st.divider()
 
-    # ── Summary ──────────────────────────────────────────────────────────────
-    st.header("📊 Summary")
-    col1, col2, col3, col4 = st.columns(4)
-    critical_count = sum(1 for r in report.risk_register if r.level == "Critical")
-    high_count = sum(1 for r in report.risk_register if r.level == "High")
-    medium_count = sum(1 for r in report.risk_register if r.level == "Medium")
-    low_count = sum(1 for r in report.risk_register if r.level == "Low")
+@app.route("/")
+def index():
+    """Home page with project introduction and Start Assessment button."""
+    return render_template("index.html")
 
-    col1.metric("🔴 Critical", critical_count)
-    col2.metric("🟠 High", high_count)
-    col3.metric("🟡 Medium", medium_count)
-    col4.metric("🟢 Low", low_count)
 
-    if critical_count > 0:
-        st.error(
-            f"⚠️ **STOP-AND-FIX**: You have {critical_count} Critical risk(s). "
-            "Do not proceed until these are resolved or formally accepted by your sponsor."
-        )
+@app.route("/interview")
+def interview():
+    """Interview form page."""
+    prefill = session.get("form_data", {})
+    return render_template("interview.html", prefill=prefill)
 
-    # ── Risk Register ─────────────────────────────────────────────────────────
-    st.header("📋 Risk Register")
-    level_colors = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🟢"}
-    for i, risk in enumerate(report.risk_register, 1):
-        icon = level_colors.get(risk.level, "⚪")
-        with st.expander(f"{icon} #{i} [{risk.level}] — {risk.description}"):
-            c1, c2, c3, c4 = st.columns(4)
-            c1.markdown(f"**Category:** {risk.category}")
-            c2.markdown(f"**Probability:** {risk.probability}")
-            c3.markdown(f"**Impact:** {risk.impact}")
-            c4.markdown(f"**Risk Score:** {risk.score}")
-            st.info(f"**Recommended Action:** {risk.action}")
 
-            # Live-data enrichment
-            if risk.recent_news_title:
-                news_link = f"[{risk.recent_news_title}]({risk.recent_news_link})" if risk.recent_news_link else risk.recent_news_title
-                st.markdown(f"📰 **Recent News:** {news_link} _{risk.recent_news_date}_")
-            if risk.regulatory_status:
-                st.markdown(f"🏛️ **Regulatory Note:** {risk.regulatory_status}")
-            if risk.market_signal:
-                st.markdown(f"💰 **Market Signal:** {risk.market_signal}")
-            if risk.academic_citation:
-                st.markdown(f"📚 **Research:** {risk.academic_citation}")
+@app.route("/generate-report", methods=["POST"])
+def generate_report():
+    """Process form submission and store validated data in session."""
+    industry = _INDUSTRY_MAP.get(request.form.get("industry", ""), "construction")
 
-    # ── Live Data Sections ────────────────────────────────────────────────────
+    try:
+        years_experience = int(request.form.get("years_experience", 0))
+        years_experience = max(0, min(years_experience, 60))
+    except (ValueError, TypeError):
+        years_experience = 0
 
-    # 1. Regulatory Updates
-    if report.regulatory_updates:
-        st.header("🌍 Latest Regulatory Updates")
-        for item in report.regulatory_updates:
-            title = item.get("title", "")
-            url = item.get("url", "")
-            date = item.get("date", "")
-            if url:
-                st.markdown(f"- [{title}]({url}) _{date}_")
-            else:
-                st.markdown(f"- {title} _{date}_")
-    else:
-        if live_ok:
-            st.header("🌍 Latest Regulatory Updates")
-            st.caption("No regulatory updates found for this query.")
+    try:
+        projects_managed = int(request.form.get("projects_managed", 0))
+        projects_managed = max(0, min(projects_managed, 500))
+    except (ValueError, TypeError):
+        projects_managed = 0
 
-    # 2. Industry News
-    if report.industry_news:
-        st.header("📰 Industry News This Week")
-        for item in report.industry_news:
-            title = item.get("title", "")
-            url = item.get("url", "")
-            date = item.get("date", "")
-            if url:
-                st.markdown(f"- [{title}]({url}) _{date}_")
-            else:
-                st.markdown(f"- {title} _{date}_")
-    else:
-        if live_ok:
-            st.header("📰 Industry News This Week")
-            st.caption("No industry news found for this query.")
+    cultural_region = request.form.get("cultural_region", "Germany").strip() or "Germany"
 
-    # 3. Market Signals
-    if report.market_signals:
-        st.header("💰 Market Signals")
-        news_signals = report.market_signals.get("news_signals", [])
-        macro = report.market_signals.get("macro_indicators", [])
-        commodity = report.market_signals.get("commodity_signals", [])
-        if commodity:
-            st.subheader("Industry Price Indicators")
-            cols = st.columns(min(len(commodity), 4))
-            for col, ind in zip(cols, commodity):
-                label = ind.get("indicator", "")
-                value = ind.get("value", "N/A")
-                trend = ind.get("trend", "")
-                col.metric(label, value, delta=trend if trend else None)
-                col.caption(f"Source: {ind.get('source', 'Industry Index')}")
-        if macro:
-            st.subheader("Macro Indicators")
-            cols = st.columns(len(macro))
-            for col, ind in zip(cols, macro):
-                label = ind.get("indicator", "").replace("_", " ").title()
-                value = ind.get("value", "N/A")
-                year = ind.get("year", "")
-                col.metric(label, f"{value} ({year})", delta=None)
-                col.caption(f"Source: {ind.get('source', 'World Bank')}")
-        for item in news_signals[:3]:
-            title = item.get("title", "")
-            url = item.get("url", "")
-            if url:
-                st.markdown(f"- [{title}]({url})")
-            else:
-                st.markdown(f"- {title}")
+    top_risks: list[str] = []
+    for i in range(1, 4):
+        risk_text = request.form.get(f"risk{i}", "").strip()
+        if risk_text:
+            top_risks.append(risk_text)
 
-    # 4. Academic Research
-    if report.academic_research:
-        st.header("📚 Recent Research")
-        for paper in report.academic_research:
-            title = paper.get("title", "")
-            authors = paper.get("authors", "")
-            pub = paper.get("published", "")[:7]
-            url = paper.get("url", "")
-            summary = paper.get("summary", "")[:200]
-            with st.expander(f"📄 {title}"):
-                st.markdown(f"**Authors:** {authors}  |  **Published:** {pub}")
-                if summary:
-                    st.markdown(f"*{summary}...*")
-                if url:
-                    st.markdown(f"[View on arXiv]({url})")
-                st.caption("Source: arXiv")
+    risk_locus = _LOCUS_MAP.get(request.form.get("risk_locus", ""), "mixed")
+    decision_style = _STYLE_MAP.get(request.form.get("decision_style", ""), "balance")
 
-    # 5. Geopolitical Alerts
-    if report.geopolitical_alerts:
-        st.header("⚠️ Geopolitical Alerts")
-        for item in report.geopolitical_alerts:
-            title = item.get("title", "")
-            url = item.get("url", "")
-            date = item.get("date", "")
-            if url:
-                st.warning(f"[{title}]({url}) _{date}_")
-            else:
-                st.warning(f"{title} _{date}_")
+    time_pressure = request.form.get("time_pressure", "medium").lower()
+    if time_pressure not in ("low", "medium", "high"):
+        time_pressure = "medium"
 
-    # ── Industry Context ──────────────────────────────────────────────────────
-    st.header(f"🏗 Industry Context — {industry}")
-    ind_data = report.industry_risks
-    col_l, col_r = st.columns(2)
-    with col_l:
-        st.subheader("External Risks")
-        for r in ind_data.get("primary_external", []):
-            st.markdown(f"- {r}")
-    with col_r:
-        st.subheader("Internal Risks")
-        for r in ind_data.get("primary_internal", []):
-            st.markdown(f"- {r}")
+    session["form_data"] = {
+        "industry": industry,
+        "years_experience": years_experience,
+        "projects_managed": projects_managed,
+        "cultural_region": cultural_region,
+        "top_risks": top_risks,
+        "risk_locus": risk_locus,
+        "decision_style": decision_style,
+        "time_pressure": time_pressure,
+    }
 
-    st.subheader("⚡ Blind Spots for Outsiders")
-    for r in ind_data.get("blind_spots_for_outsiders", []):
-        st.warning(r)
+    return redirect(url_for("report"))
 
-    # ── Experience-Level Guidance ─────────────────────────────────────────────
-    exp = report.experience_guidance
-    st.header(f"👤 Guidance for {ctx.experience_level.title()} Project Managers")
-    col_s, col_d = st.columns(2)
-    with col_s:
-        st.subheader("Your Strengths ✅")
-        for s in exp.get("strengths", []):
-            st.markdown(f"- {s}")
-    with col_d:
-        st.subheader("Development Areas 📌")
-        for d in exp.get("development_areas", []):
-            st.markdown(f"- {d}")
 
-    st.subheader("Recommended Actions for the First 20%")
-    for a in exp.get("recommended_actions", []):
-        st.markdown(f"→ {a}")
+@app.route("/report")
+def report():
+    """Display the generated risk assessment report."""
+    ctx, assessment = _build_report_from_session()
+    if assessment is None:
+        return redirect(url_for("index"))
 
-    # ── Decision Frameworks ───────────────────────────────────────────────────
-    st.header("🧰 Decision Frameworks")
-    for fw in report.framework_recommendations:
-        with st.expander(f"▸ {fw['name']}"):
-            st.markdown(fw["description"])
-            st.markdown(f"**When to apply:** {fw['when_to_apply']}")
-            st.markdown(f"**Example:** *{fw['example']}*")
-
-    # ── 20% Reality Check ────────────────────────────────────────────────────
-    st.header("📅 Your 20% Reality Check Milestone")
-    rc = report.reality_check_plan
-    st.info(rc["description"])
-    st.subheader("Workshop Agenda")
-    for item in rc.get("agenda_items", []):
-        st.checkbox(item, key=item)
-    st.success(f"**Expected output:** {rc.get('output', '')}")
-
-    # ── First 20% Action Checklist ────────────────────────────────────────────
-    st.header(f"🚀 First 20% Action Checklist — {industry}")
-    for action in ind_data.get("first_20_percent_actions", []):
-        st.checkbox(action, key=action)
-
-    # ── Cultural Archetype ────────────────────────────────────────────────────
     arch = CULTURAL_ARCHETYPES.get(ctx.cultural_region)
-    if arch:
-        st.header(f"🌍 Cultural Archetype: {ctx.cultural_region.replace('_', ' ').title()}")
-        st.subheader("Characteristics")
-        for c in arch.get("characteristics", []):
-            st.markdown(f"- {c}")
-        st.subheader("Blind Spots")
-        for bs in arch.get("blind_spots", []):
-            st.warning(bs)
-        st.subheader("Development Recommendation")
-        st.info(arch.get("recommended_development", ""))
 
-    st.divider()
-    st.caption(
-        "Report generated by the **Project Risk Assessment Agent** | "
-        "Thesis: *Understanding Risk Awareness and Decision Making in Early-Stage Project Planning* "
-        "— Devarshi Kansara, HDBW 2026"
+    critical_count = sum(1 for r in assessment.risk_register if r.level == "Critical")
+    high_count = sum(1 for r in assessment.risk_register if r.level == "High")
+    medium_count = sum(1 for r in assessment.risk_register if r.level == "Medium")
+    low_count = sum(1 for r in assessment.risk_register if r.level == "Low")
+
+    return render_template(
+        "report.html",
+        report=assessment,
+        ctx=ctx,
+        arch=arch,
+        level_icons=_LEVEL_ICONS,
+        critical_count=critical_count,
+        high_count=high_count,
+        medium_count=medium_count,
+        low_count=low_count,
     )
+
+
+@app.route("/download-pdf")
+def download_pdf():
+    """Generate and download the report as a PDF using reportlab."""
+    ctx, assessment = _build_report_from_session()
+    if assessment is None:
+        return redirect(url_for("index"))
+
+    try:
+        from reportlab.lib import colors  # type: ignore[import-untyped]
+        from reportlab.lib.enums import TA_CENTER  # type: ignore[import-untyped]
+        from reportlab.lib.pagesizes import A4  # type: ignore[import-untyped]
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet  # type: ignore[import-untyped]
+        from reportlab.lib.units import mm  # type: ignore[import-untyped]
+        from reportlab.platypus import (  # type: ignore[import-untyped]
+            HRFlowable,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
+        )
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=20 * mm,
+            leftMargin=20 * mm,
+            topMargin=20 * mm,
+            bottomMargin=20 * mm,
+            title="Project Risk Assessment Report",
+            author="Risk Assessment Agent",
+        )
+
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            "ReportTitle",
+            parent=styles["Title"],
+            fontSize=20,
+            spaceAfter=4,
+            textColor=colors.HexColor("#2c3e50"),
+        )
+        heading1_style = ParagraphStyle(
+            "ReportH1",
+            parent=styles["Heading1"],
+            fontSize=13,
+            spaceBefore=8,
+            spaceAfter=4,
+            textColor=colors.HexColor("#2c3e50"),
+        )
+        caption_style = ParagraphStyle(
+            "Caption",
+            parent=styles["Normal"],
+            fontSize=8,
+            textColor=colors.grey,
+            alignment=TA_CENTER,
+        )
+
+        story = []
+
+        # Title block
+        story.append(Paragraph("Project Risk Assessment Report", title_style))
+        story.append(
+            Paragraph(
+                f"Industry: <b>{ctx.industry.title()}</b> &nbsp;|&nbsp; "
+                f"Experience: <b>{ctx.experience_level.title()}</b> &nbsp;|&nbsp; "
+                f"Time Pressure: <b>{ctx.time_pressure.title()}</b>",
+                styles["Normal"],
+            )
+        )
+        story.append(Spacer(1, 6 * mm))
+        story.append(HRFlowable(width="100%", color=colors.HexColor("#2c3e50")))
+        story.append(Spacer(1, 4 * mm))
+
+        # Executive summary
+        story.append(Paragraph("Executive Summary", heading1_style))
+        for line in assessment.summary.split("\n"):
+            if line.strip():
+                story.append(Paragraph(line.strip(), styles["Normal"]))
+        story.append(Spacer(1, 4 * mm))
+
+        # Risk Register
+        story.append(Paragraph("Risk Register", heading1_style))
+        header_row = ["#", "Description", "Category", "Level", "Score", "Recommended Action"]
+        table_data = [header_row]
+
+        level_bg = {
+            "Critical": colors.HexColor("#e74c3c"),
+            "High": colors.HexColor("#e67e22"),
+            "Medium": colors.HexColor("#f1c40f"),
+            "Low": colors.HexColor("#2ecc71"),
+        }
+
+        for i, risk in enumerate(assessment.risk_register, 1):
+            desc = risk.description if len(risk.description) <= 70 else risk.description[:67] + "..."
+            action = risk.action if len(risk.action) <= 60 else risk.action[:57] + "..."
+            table_data.append([str(i), desc, risk.category, risk.level, str(risk.score), action])
+
+        col_widths = [8 * mm, 58 * mm, 24 * mm, 18 * mm, 12 * mm, 46 * mm]
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
+
+        ts = TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8f9fa")]),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dee2e6")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+        for i, risk in enumerate(assessment.risk_register, 1):
+            bg = level_bg.get(risk.level, colors.white)
+            ts.add("BACKGROUND", (3, i), (3, i), bg)
+            if risk.level in ("Critical", "High"):
+                ts.add("TEXTCOLOR", (3, i), (3, i), colors.white)
+        table.setStyle(ts)
+        story.append(table)
+        story.append(Spacer(1, 4 * mm))
+
+        # First 20% Action Checklist
+        ind_data = assessment.industry_risks
+        actions = ind_data.get("first_20_percent_actions", [])
+        if actions:
+            story.append(Paragraph(f"First 20% Action Checklist — {ctx.industry.title()}", heading1_style))
+            for action in actions:
+                story.append(Paragraph(f"☐  {action}", styles["Normal"]))
+            story.append(Spacer(1, 4 * mm))
+
+        # Footer
+        story.append(HRFlowable(width="100%", color=colors.HexColor("#2c3e50")))
+        story.append(Spacer(1, 2 * mm))
+        story.append(
+            Paragraph(
+                "Generated by Project Risk Assessment Agent &nbsp;|&nbsp; "
+                "Thesis: <i>Understanding Risk Awareness and Decision Making in "
+                "Early-Stage Project Planning</i> — Devarshi Kansara, HDBW 2026",
+                caption_style,
+            )
+        )
+
+        doc.build(story)
+        buffer.seek(0)
+
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name="risk_assessment_report.pdf",
+            mimetype="application/pdf",
+        )
+
+    except ImportError:
+        # reportlab not installed — fall back to plain text
+        lines = ["Project Risk Assessment Report", "=" * 40, "", assessment.summary, ""]
+        lines += ["Risk Register", "-" * 40]
+        for i, risk in enumerate(assessment.risk_register, 1):
+            lines.append(f"{i}. [{risk.level}] {risk.description}")
+            lines.append(f"   Score: {risk.score} | Category: {risk.category}")
+            lines.append(f"   Action: {risk.action}")
+            lines.append("")
+        content = "\n".join(lines)
+        return send_file(
+            io.BytesIO(content.encode("utf-8")),
+            as_attachment=True,
+            download_name="risk_assessment_report.txt",
+            mimetype="text/plain",
+        )
+
+
+if __name__ == "__main__":
+    app.run(debug=False, host="127.0.0.1", port=5000)

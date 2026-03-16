@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+
+{% block title %}Risk Assessment Report — {{ ctx.industry | title }}{% endblock %}
+
+{% block content %}
+<div class="container">
+
+  <!-- Report Header -->
+  <div class="report-header">
+    <div class="report-header-left">
+      <h1>📊 Risk Assessment Report</h1>
+      <p class="report-meta">
+        Industry: <strong>{{ ctx.industry | title }}</strong> &nbsp;|&nbsp;
+        Experience: <strong>{{ ctx.experience_level | title }}</strong> &nbsp;|&nbsp;
+        Time Pressure: <strong>{{ ctx.time_pressure | title }}</strong>
+      </p>
+    </div>
+    <div class="report-header-actions no-print">
+      <a href="{{ url_for('download_pdf') }}" class="btn btn-secondary">
+        📄 Download PDF
+      </a>
+      <a href="{{ url_for('interview') }}" class="btn btn-outline">
+        🔄 New Assessment
+      </a>
+    </div>
+  </div>
+
+  <hr class="report-divider" />
+
+  <!-- ── Summary Metrics ──────────────────────────────────────────────────── -->
+  <section class="report-section">
+    <h2>📋 Summary</h2>
+
+    <div class="metric-grid">
+      <div class="metric-card metric-critical">
+        <div class="metric-value">{{ critical_count }}</div>
+        <div class="metric-label">🔴 Critical</div>
+      </div>
+      <div class="metric-card metric-high">
+        <div class="metric-value">{{ high_count }}</div>
+        <div class="metric-label">🟠 High</div>
+      </div>
+      <div class="metric-card metric-medium">
+        <div class="metric-value">{{ medium_count }}</div>
+        <div class="metric-label">🟡 Medium</div>
+      </div>
+      <div class="metric-card metric-low">
+        <div class="metric-value">{{ low_count }}</div>
+        <div class="metric-label">🟢 Low</div>
+      </div>
+    </div>
+
+    {% if critical_count > 0 %}
+    <div class="alert alert-danger">
+      <strong>⚠️ STOP-AND-FIX:</strong>
+      You have {{ critical_count }} Critical risk{{ 's' if critical_count > 1 else '' }}.
+      Do not proceed until these are resolved or formally accepted by your sponsor.
+    </div>
+    {% endif %}
+
+    <div class="summary-box">
+      <pre class="summary-text">{{ report.summary }}</pre>
+    </div>
+  </section>
+
+  <!-- ── Risk Register ────────────────────────────────────────────────────── -->
+  <section class="report-section">
+    <h2>📋 Risk Register</h2>
+    <p class="section-intro">
+      Sorted by risk score (highest first). Score&nbsp;=&nbsp;Probability &times; Impact &times; Detectability.
+    </p>
+
+    <div class="table-wrap">
+      <table class="risk-table" id="risk-table">
+        <thead>
+          <tr>
+            <th class="sortable" data-col="0">#</th>
+            <th class="sortable" data-col="1">Description</th>
+            <th class="sortable" data-col="2">Category</th>
+            <th class="sortable" data-col="3">Level</th>
+            <th class="sortable" data-col="4">Score</th>
+            <th>Recommended Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for risk in report.risk_register %}
+          <tr class="risk-row risk-{{ risk.level | lower }}">
+            <td class="risk-num">{{ loop.index }}</td>
+            <td class="risk-desc">
+              <strong>{{ risk.description }}</strong>
+              {% if risk.recent_news_title %}
+              <div class="risk-news">
+                📰
+                {% if risk.recent_news_link %}
+                  <a href="{{ risk.recent_news_link }}" target="_blank" rel="noopener noreferrer">
+                    {{ risk.recent_news_title }}
+                  </a>
+                {% else %}
+                  {{ risk.recent_news_title }}
+                {% endif %}
+                {% if risk.recent_news_date %}<em>({{ risk.recent_news_date }})</em>{% endif %}
+              </div>
+              {% endif %}
+              {% if risk.regulatory_status %}
+              <div class="risk-tag">🏛️ {{ risk.regulatory_status }}</div>
+              {% endif %}
+              {% if risk.market_signal %}
+              <div class="risk-tag">💰 {{ risk.market_signal }}</div>
+              {% endif %}
+              {% if risk.academic_citation %}
+              <div class="risk-tag">📚 {{ risk.academic_citation }}</div>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge badge-category">{{ risk.category }}</span>
+            </td>
+            <td>
+              <span class="badge badge-level badge-{{ risk.level | lower }}">
+                {{ level_icons.get(risk.level, '') }} {{ risk.level }}
+              </span>
+            </td>
+            <td class="risk-score">
+              <strong>{{ risk.score }}</strong>
+            </td>
+            <td class="risk-action">{{ risk.action }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Industry Context ─────────────────────────────────────────────────── -->
+  <section class="report-section">
+    <h2>🏗 Industry Context — {{ ctx.industry | title }}</h2>
+    <div class="two-col">
+      <div>
+        <h3>Primary External Risks</h3>
+        <ul>
+          {% for r in report.industry_risks.get('primary_external', []) %}
+          <li>{{ r }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div>
+        <h3>Primary Internal Risks</h3>
+        <ul>
+          {% for r in report.industry_risks.get('primary_internal', []) %}
+          <li>{{ r }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+    {% set blind_spots = report.industry_risks.get('blind_spots_for_outsiders', []) %}
+    {% if blind_spots %}
+    <h3>⚡ Blind Spots for Outsiders</h3>
+    <ul class="blind-spots">
+      {% for spot in blind_spots %}
+      <li class="alert alert-warning">{{ spot }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+
+  <!-- ── Experience-Level Guidance ────────────────────────────────────────── -->
+  <section class="report-section">
+    <h2>👤 Guidance for {{ ctx.experience_level | title }} Project Managers</h2>
+    <div class="two-col">
+      <div>
+        <h3>Your Strengths ✅</h3>
+        <ul>
+          {% for s in report.experience_guidance.get('strengths', []) %}
+          <li>{{ s }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div>
+        <h3>Development Areas 📌</h3>
+        <ul>
+          {% for d in report.experience_guidance.get('development_areas', []) %}
+          <li>{{ d }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+    {% set rec_actions = report.experience_guidance.get('recommended_actions', []) %}
+    {% if rec_actions %}
+    <h3>Recommended Actions for the First 20%</h3>
+    <ul class="action-list">
+      {% for a in rec_actions %}
+      <li>→ {{ a }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+
+  <!-- ── Decision Frameworks ───────────────────────────────────────────────── -->
+  <section class="report-section">
+    <h2>🧰 Decision Frameworks</h2>
+    <div class="framework-grid">
+      {% for fw in report.framework_recommendations %}
+      <div class="framework-card">
+        <h3 class="framework-name">▸ {{ fw.name }}</h3>
+        <p>{{ fw.description }}</p>
+        <p class="framework-when"><strong>When to apply:</strong> {{ fw.when_to_apply }}</p>
+        <p class="framework-example"><em>Example: {{ fw.example }}</em></p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- ── 20% Reality Check ─────────────────────────────────────────────────── -->
+  <section class="report-section">
+    <h2>📅 Your 20% Reality Check Milestone</h2>
+    {% set rc = report.reality_check_plan %}
+    <div class="alert alert-info">{{ rc.description }}</div>
+
+    <h3>Workshop Agenda</h3>
+    <ul class="checklist">
+      {% for item in rc.get('agenda_items', []) %}
+      <li>
+        <label>
+          <input type="checkbox" class="print-checkbox" />
+          {{ item }}
+        </label>
+      </li>
+      {% endfor %}
+    </ul>
+
+    <div class="alert alert-success">
+      <strong>Expected output:</strong> {{ rc.get('output', '') }}
+    </div>
+  </section>
+
+  <!-- ── First 20% Action Checklist ───────────────────────────────────────── -->
+  <section class="report-section">
+    <h2>🚀 First 20% Action Checklist — {{ ctx.industry | title }}</h2>
+    <ul class="checklist">
+      {% for action in report.industry_risks.get('first_20_percent_actions', []) %}
+      <li>
+        <label>
+          <input type="checkbox" class="print-checkbox" />
+          {{ action }}
+        </label>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <!-- ── Cultural Archetype ────────────────────────────────────────────────── -->
+  {% if arch %}
+  <section class="report-section">
+    <h2>🌍 Cultural Archetype: {{ ctx.cultural_region | replace('_', ' ') | title }}</h2>
+
+    <h3>Characteristics</h3>
+    <ul>
+      {% for c in arch.get('characteristics', []) %}
+      <li>{{ c }}</li>
+      {% endfor %}
+    </ul>
+
+    <h3>Blind Spots</h3>
+    <ul class="blind-spots">
+      {% for bs in arch.get('blind_spots', []) %}
+      <li class="alert alert-warning">{{ bs }}</li>
+      {% endfor %}
+    </ul>
+
+    <h3>Development Recommendation</h3>
+    <div class="alert alert-info">{{ arch.get('recommended_development', '') }}</div>
+  </section>
+  {% endif %}
+
+  <!-- ── Download / New Assessment ────────────────────────────────────────── -->
+  <div class="report-footer no-print">
+    <a href="{{ url_for('download_pdf') }}" class="btn btn-primary">
+      📄 Download as PDF
+    </a>
+    <a href="{{ url_for('interview') }}" class="btn btn-outline">
+      🔄 Start New Assessment
+    </a>
+  </div>
+
+  <p class="report-caption">
+    Report generated by the <strong>Project Risk Assessment Agent</strong> |
+    Thesis: <em>Understanding Risk Awareness and Decision Making in Early-Stage Project Planning</em>
+    — Devarshi Kansara, HDBW 2026
+  </p>
+
+</div><!-- /container -->
+
+<script>
+  // Lightweight table sort
+  (function () {
+    var table = document.getElementById('risk-table');
+    if (!table) return;
+    var headers = table.querySelectorAll('th.sortable');
+    var sortState = {};
+
+    headers.forEach(function (th) {
+      th.style.cursor = 'pointer';
+      th.addEventListener('click', function () {
+        var col = parseInt(th.dataset.col, 10);
+        var asc = !sortState[col];
+        sortState = {};
+        sortState[col] = asc;
+
+        var tbody = table.querySelector('tbody');
+        var rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort(function (a, b) {
+          var aVal = a.cells[col].textContent.trim();
+          var bVal = b.cells[col].textContent.trim();
+          var aNum = parseFloat(aVal);
+          var bNum = parseFloat(bVal);
+          if (!isNaN(aNum) && !isNaN(bNum)) {
+            return asc ? aNum - bNum : bNum - aNum;
+          }
+          return asc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+        });
+        rows.forEach(function (r) { tbody.appendChild(r); });
+
+        headers.forEach(function (h) { h.classList.remove('sort-asc', 'sort-desc'); });
+        th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+      });
+    });
+  })();
+</script>
+{% endblock %}
