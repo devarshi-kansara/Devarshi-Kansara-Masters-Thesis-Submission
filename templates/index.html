@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}Project Risk Assessment Agent — Home{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-badge">Based on Master's Thesis Research</div>
+    <h1 class="hero-title">Project Risk Assessment Agent</h1>
+    <p class="hero-subtitle">
+      Early-Stage Risk Identification for Construction, Manufacturing &amp; IT Projects
+    </p>
+    <p class="hero-description">
+      Research shows that <strong>~70% of project failures</strong> stem from decisions made in the
+      <strong>first 20%</strong> of the project lifecycle — before major commitments become
+      physically irreversible. This tool helps you identify, prioritise, and act on risks
+      <em>before it is too late</em>.
+    </p>
+    <a href="{{ url_for('interview') }}" class="btn btn-primary btn-large">
+      🚀 Start Assessment
+    </a>
+  </div>
+</section>
+
+<section class="features">
+  <div class="container">
+    <h2 class="section-title">What this tool does</h2>
+    <div class="feature-grid">
+
+      <div class="feature-card">
+        <div class="feature-icon">📋</div>
+        <h3>Risk Register</h3>
+        <p>
+          Generates a scored and sorted risk register combining your top concerns with
+          industry-specific knowledge-base risks.
+        </p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🧰</div>
+        <h3>Decision Frameworks</h3>
+        <p>
+          Selects contextually relevant decision frameworks from the thesis — Safety Premium,
+          Somatic Verification, Bureaucratic Shield, and more.
+        </p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">📅</div>
+        <h3>20% Reality Check</h3>
+        <p>
+          Provides a structured workshop agenda for your mandatory mid-phase risk-validation
+          milestone.
+        </p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🌍</div>
+        <h3>Cultural Archetypes</h3>
+        <p>
+          Detects your cultural risk archetype (Process Guardian / Resource Navigator) and
+          provides cross-training recommendations.
+        </p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">📄</div>
+        <h3>PDF Export</h3>
+        <p>
+          Download your full report as a professionally formatted PDF — ready to share with
+          your sponsor and team.
+        </p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <h3>Personalised Guidance</h3>
+        <p>
+          Tailored strengths, development areas, and recommended actions based on your
+          experience level (Junior / Mid / Senior).
+        </p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="how-it-works">
+  <div class="container">
+    <h2 class="section-title">How it works</h2>
+    <ol class="steps">
+      <li class="step">
+        <span class="step-number">1</span>
+        <div class="step-content">
+          <strong>Fill in the form</strong> — your background, top risks, decision style, and
+          time pressure.
+        </div>
+      </li>
+      <li class="step">
+        <span class="step-number">2</span>
+        <div class="step-content">
+          <strong>Click Generate Report</strong> — the agent analyses your context and builds a
+          personalised assessment.
+        </div>
+      </li>
+      <li class="step">
+        <span class="step-number">3</span>
+        <div class="step-content">
+          <strong>Review your report</strong> — risk register, frameworks, checklists, and
+          cultural archetype insights.
+        </div>
+      </li>
+      <li class="step">
+        <span class="step-number">4</span>
+        <div class="step-content">
+          <strong>Download as PDF</strong> — share with your sponsor, team, or project file.
+        </div>
+      </li>
+    </ol>
+    <div class="cta-center">
+      <a href="{{ url_for('interview') }}" class="btn btn-primary btn-large">
+        🚀 Start Your Assessment
+      </a>
+    </div>
+  </div>
+</section>
+{% endblock %}

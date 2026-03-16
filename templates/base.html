@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Project Risk Assessment Agent{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a class="navbar-brand" href="{{ url_for('index') }}">
+        🏗 Risk Assessment Agent
+      </a>
+      <div class="navbar-links">
+        <a href="{{ url_for('index') }}">Home</a>
+        <a href="{{ url_for('interview') }}">New Assessment</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main content -->
+  <main class="main-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <p>
+        Based on the thesis:
+        <em>Understanding Risk Awareness and Decision Making in Early-Stage Project Planning</em>
+        &mdash; Devarshi Kansara, HDBW 2026
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>
